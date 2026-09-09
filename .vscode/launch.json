@@ -1,0 +1,11 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Apache Desktop",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": ".\\gradlew :desktop:run"
+        }
+    ]
+}

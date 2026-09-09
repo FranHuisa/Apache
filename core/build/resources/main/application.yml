@@ -1,0 +1,26 @@
+server:
+  port: 8080
+
+apache:
+  gemini:
+    # IMPORTANTE: no subir vuestra API key real a git. En un entorno real
+    # esto se lee de una variable de entorno: ${GEMINI_API_KEY}
+    api-key: ${GEMINI_API_KEY:PON_AQUI_TU_API_KEY}
+    model: gemini-3.6-flash
+
+  db:
+    # Prototipo: SQLite en un archivo local junto al ejecutable.
+    # Ahora usamos MySQL como base de datos del proyecto.
+    url: jdbc:mysql://localhost:3306/apache
+    driver: com.mysql.cj.jdbc.Driver
+    username: root
+    password: root
+
+    # Cuando migréis a MySQL, sustituir por algo como:
+    # url: jdbc:mysql://localhost:3306/apache
+    # driver: com.mysql.cj.jdbc.Driver
+
+logging:
+  level:
+    com.apache: DEBUG
+
