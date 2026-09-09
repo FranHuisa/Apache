@@ -6,8 +6,7 @@ apache:
     # IMPORTANTE: no subir vuestra API key real a git. En un entorno real
     # esto se lee de una variable de entorno: ${GEMINI_API_KEY}
     api-key: ${GEMINI_API_KEY:PON_AQUI_TU_API_KEY}
-    model: gemini-3.6-flash
-
+    model: gemini-3.1-flash-lite
   db:
     # Prototipo: SQLite en un archivo local junto al ejecutable.
     # Ahora usamos MySQL como base de datos del proyecto.
