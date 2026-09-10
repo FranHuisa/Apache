@@ -17,7 +17,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
-
+    // Dependencia para controlar la reproducción multimedia en Windows (Spotify, reproductores locales, etc.)
+    implementation("org.endlesssource.mediainterface:all:3.0.0")
     // Persistencia local. Exposed es un ORM ligero 100% Kotlin de JetBrains.
     // Usamos SQLite ahora (fase prototipo); migrar a MySQL más adelante
     // solo implica cambiar el driver JDBC y la URL de conexión en
