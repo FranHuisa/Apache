@@ -1,5 +1,31 @@
 # Bitácora de desarrollo — Apache
 
+## 10/09/2026 — feature/get-weather
+
+### Objetivo
+
+Añadir dos tools nuevas: consulta del tiempo (`getWeather`) y control multimedia
+(`musicControl`).
+
+### Trabajo realizado
+
+* Creada `GetWeatherTool` (READ_ONLY): consulta el tiempo actual y previsión de
+  hasta 7 días para cualquier localización, usando la API pública de
+  Open-Meteo (geocoding + forecast, sin necesidad de API key).
+* Creada `MusicControlTool` (REVERSIBLE): play/pausa, siguiente/anterior,
+  subir/bajar/fijar volumen y consultar qué se está reproduciendo.
+* Creada la abstracción `MusicSource` (`core/tools/music`) para que
+  `MusicControlTool` no dependa de ningún reproductor concreto. Añadida
+  `NoOpMusicSource` como fallback mientras no haya ninguna integración real,
+  y `MusicSourceManager` para elegir la fuente activa entre todas las
+  registradas en Spring.
+
+### Pendiente
+
+* Integrar una `MusicSource` real (Spotify, reproductor local, YouTube Music).
+* Decidir si `getWeather` necesita cachear resultados para evitar pedir el
+  mismo tiempo repetidamente en una misma conversación.
+
 ## 09/09/2026
 
 ### Objetivo

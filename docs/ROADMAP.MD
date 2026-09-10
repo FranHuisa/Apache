@@ -28,7 +28,8 @@
 * [x] Permisos
 * [ ] Abrir aplicaciones
 * [ ] Archivos
-* [ ] Herramientas de Internet/API
+* [x] Herramientas de Internet/API (tiempo/previsión vía Open-Meteo)
+* [x] Control multimedia (base extensible; falta integrar una fuente real)
 * [ ] Ampliar catálogo de herramientas
 
 ## Fase 4 — Memoria
