@@ -16,6 +16,7 @@ package com.apache.tools
  * y viceversa, añadir un parámetro opcional nuevo sin romper nada.
  */
 interface Tool {
+
     /** Nombre único de la tool, tal cual lo verá y usará Gemini (ej. "getCurrentTime"). */
     val name: String
 
@@ -38,9 +39,19 @@ interface Tool {
      *   "required" to listOf("path")
      * )
      * ```
+     *
      * Si la tool no recibe parámetros, se puede devolver un objeto vacío.
      */
     val parametersSchema: Map<String, Any?>
+
+    /**
+     * Indica si, después de ejecutar la tool, Apache debe volver a Gemini
+     * para que redacte la respuesta final.
+     *
+     * Por defecto se mantiene el comportamiento actual de Apache.
+     */
+    val requiresGeminiResponse: Boolean
+        get() = true
 
     /**
      * Ejecuta la tool con los argumentos que ha decidido Gemini.

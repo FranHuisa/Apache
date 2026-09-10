@@ -1,5 +1,6 @@
 package com.apache.tools.music
 
+import net.bjoernpetersen.volctl.VolumeControl
 import org.endlesssource.mediainterface.SystemMediaFactory
 import org.endlesssource.mediainterface.api.MediaSession
 import org.endlesssource.mediainterface.api.SystemMediaInterface
@@ -15,7 +16,6 @@ import org.springframework.stereotype.Component
  * No depende de una versión concreta de Spotify ni busca el proceso
  * "Spotify.exe". La fuente trabaja contra la interfaz multimedia del sistema.
  */
-
 @Component
 class WindowsMusicSource : MusicSource {
 
@@ -24,6 +24,8 @@ class WindowsMusicSource : MusicSource {
     override val displayName = "Windows Media"
 
     override val priority = 100
+
+    private val volumeControl = VolumeControl()
 
     override fun isAvailable(): Boolean {
         return try {
@@ -66,15 +68,32 @@ class WindowsMusicSource : MusicSource {
     }
 
     override fun volumeUp(): Boolean {
-        return false
+        return try {
+            val currentVolume = volumeControl.volume
+            volumeControl.volume = (currentVolume + 10).coerceAtMost(100)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     override fun volumeDown(): Boolean {
-        return false
+        return try {
+            val currentVolume = volumeControl.volume
+            volumeControl.volume = (currentVolume - 10).coerceAtLeast(0)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     override fun setVolume(percent: Int): Boolean {
-        return false
+        return try {
+            volumeControl.volume = percent.coerceIn(0, 100)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     override fun getStatus(): PlaybackStatus {
@@ -82,7 +101,8 @@ class WindowsMusicSource : MusicSource {
             withMediaInterface { media ->
                 val session = media.getActiveSession().orElse(null)
                     ?: return@withMediaInterface PlaybackStatus(
-                        isPlaying = false
+                        isPlaying = false,
+                        volumePercent = getVolume()
                     )
 
                 val nowPlaying = session.getNowPlaying().orElse(null)
@@ -94,13 +114,23 @@ class WindowsMusicSource : MusicSource {
                         ignoreCase = true
                     ),
                     title = nowPlaying?.getTitle()?.orElse(null),
-                    artist = nowPlaying?.getArtist()?.orElse(null)
+                    artist = nowPlaying?.getArtist()?.orElse(null),
+                    volumePercent = getVolume()
                 )
             }
         } catch (_: Exception) {
             PlaybackStatus(
-                isPlaying = false
+                isPlaying = false,
+                volumePercent = getVolume()
             )
+        }
+    }
+
+    private fun getVolume(): Int? {
+        return try {
+            volumeControl.volume
+        } catch (_: Exception) {
+            null
         }
     }
 

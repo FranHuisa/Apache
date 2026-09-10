@@ -19,10 +19,13 @@ package com.apache.ui
 // Permite seleccionar y copiar texto en Compose.
 
 // Tipos de datos para representar mensajes y peticiones/respuestas del Core.
+
+//
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -155,9 +158,16 @@ fun App() {
     var showThinking by remember { mutableStateOf(false) }
     /** Coroutine scope utilizado para ejecutar la petición sin bloquear la interfaz gráfica. */
     val scope = rememberCoroutineScope()
+    // Controla la posición del scroll de la conversación.
+    val chatListState = rememberLazyListState()
 
+    // Mantiene el chat desplazado hasta el último mensaje.
+    LaunchedEffect(messages.size, showThinking) {
+        if (messages.isNotEmpty()) {
+            chatListState.animateScrollToItem(messages.lastIndex)
+        }
+    }
     // Función que envía el mensaje tanto desde el botón como desde Enter.
-
     fun sendMessage() {
 
         // Quitamos espacios al principio y final.
@@ -312,6 +322,7 @@ fun App() {
                     // =====================================================
 
                     LazyColumn(
+                            state = chatListState,
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {

@@ -145,6 +145,16 @@ class Agent(
                                         "${tool.name}\n$output\n${call.id ?: ""}"
                                 )
 
+                                if (!tool.requiresGeminiResponse) {
+                                        memoryRepository.appendMessage(
+                                                conversationId,
+                                                "model",
+                                                output
+                                        )
+
+                                        return AgentResult.Reply(output)
+                                }
+
                                 runTurn(conversationId)
                         }
                         PermissionDecision.REQUIRES_CONFIRMATION -> {

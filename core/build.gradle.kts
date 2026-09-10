@@ -33,6 +33,8 @@ dependencies {
 
     // Cliente HTTP para hablar con la API de Gemini
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // controlar el volumen maestro de Windows desde Kotlin/Java.
+    implementation("com.github.bjoernpetersen:volctl:3.0.0")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
