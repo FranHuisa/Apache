@@ -77,8 +77,9 @@ class GeminiClient(
                                                 val lines = turn.text.split("\n", limit = 5)
                                                 val toolName = lines.getOrNull(1) ?: ""
                                                 val argsText = lines.getOrNull(2) ?: "{}"
-                                                val thoughtSignature = lines.getOrNull(3)
                                                 val id = lines.getOrNull(4)
+
+                                                val thoughtSignature = lines.getOrNull(3)
                                                 val args = parseFunctionArguments(argsText)
 
                                                 contents.add(
@@ -139,10 +140,34 @@ class GeminiClient(
                                 }
                                 "function" -> {
 
-                                        val lines = turn.text.split("\n", limit = 3)
-                                        val toolName = lines.getOrNull(0) ?: ""
-                                        val output = lines.getOrNull(1) ?: ""
-                                        val id = lines.getOrNull(2)
+                                        val firstSeparator = turn.text.indexOf("\n")
+                                        val lastSeparator = turn.text.lastIndexOf("\n")
+
+                                        val toolName =
+                                                if (firstSeparator >= 0) {
+                                                        turn.text.substring(0, firstSeparator)
+                                                } else {
+                                                        turn.text
+                                                }
+
+                                        val output =
+                                                if (firstSeparator >= 0 &&
+                                                                lastSeparator > firstSeparator
+                                                ) {
+                                                        turn.text.substring(
+                                                                firstSeparator + 1,
+                                                                lastSeparator
+                                                        )
+                                                } else {
+                                                        ""
+                                                }
+
+                                        val id =
+                                                if (lastSeparator > firstSeparator) {
+                                                        turn.text.substring(lastSeparator + 1)
+                                                } else {
+                                                        null
+                                                }
 
                                         contents.add(
                                                 mapOf(
