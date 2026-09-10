@@ -18,12 +18,14 @@ sealed class GeminiResult {
 
         data class TextResponse(val text: String) : GeminiResult()
 
+        data class FunctionCalls(val calls: List<FunctionCall>) : GeminiResult()
+
         data class FunctionCall(
                 val toolName: String,
                 val args: Map<String, Any?>,
                 val thoughtSignature: String? = null,
                 val id: String? = null
-        ) : GeminiResult()
+        )
 }
 
 /**
@@ -49,7 +51,7 @@ class GeminiClient(
 
         /**
          * Envía el historial de conversación + el catálogo de tools a Gemini y decide si la
-         * respuesta es texto para el usuario o una llamada a función.
+         * respuesta es texto para el usuario o una o varias llamadas a funciones.
          *
          * @param history turnos previos de la conversación (para dar contexto)
          * @param systemInstruction instrucción de sistema (personalidad, reglas de Apache)
@@ -61,7 +63,6 @@ class GeminiClient(
                 history.forEach { turn ->
                         when (turn.role) {
                                 "user" -> {
-
                                         contents.add(
                                                 mapOf(
                                                         "role" to "user",
@@ -75,11 +76,12 @@ class GeminiClient(
                                         if (turn.text.startsWith("FUNCTION_CALL\n")) {
 
                                                 val lines = turn.text.split("\n", limit = 5)
+
                                                 val toolName = lines.getOrNull(1) ?: ""
                                                 val argsText = lines.getOrNull(2) ?: "{}"
+                                                val thoughtSignature = lines.getOrNull(3)
                                                 val id = lines.getOrNull(4)
 
-                                                val thoughtSignature = lines.getOrNull(3)
                                                 val args = parseFunctionArguments(argsText)
 
                                                 contents.add(
@@ -95,6 +97,7 @@ class GeminiClient(
                                                                                                                 "name",
                                                                                                                 toolName
                                                                                                         )
+
                                                                                                         put(
                                                                                                                 "args",
                                                                                                                 args
@@ -235,7 +238,6 @@ class GeminiClient(
 
                 http.newCall(request).execute().use { response ->
                         if (!response.isSuccessful) {
-
                                 throw IllegalStateException(
                                         "Error llamando a Gemini: ${response.code} ${response.body?.string()}"
                                 )
@@ -243,30 +245,42 @@ class GeminiClient(
 
                         val json = mapper.readTree(response.body?.string())
 
-                        val part = json["candidates"][0]["content"]["parts"][0]
+                        val parts = json["candidates"][0]["content"]["parts"]
 
-                        // Gemini devuelve o bien "text", o bien "functionCall" en la parte de la
-                        // respuesta
+                        val functionCalls = mutableListOf<GeminiResult.FunctionCall>()
+                        var textResponse: String? = null
 
-                        return if (part.has("functionCall")) {
+                        parts.forEach { part ->
+                                if (part.has("functionCall")) {
 
-                                val fc = part["functionCall"]
+                                        val fc = part["functionCall"]
 
-                                val argsNode = fc["args"]
+                                        val argsNode = fc["args"]
 
-                                val args: Map<String, Any?> =
-                                        mapper.convertValue(argsNode, Map::class.java) as
-                                                Map<String, Any?>
+                                        val args: Map<String, Any?> =
+                                                mapper.convertValue(argsNode, Map::class.java) as
+                                                        Map<String, Any?>
 
-                                GeminiResult.FunctionCall(
-                                        toolName = fc["name"].asText(),
-                                        args = args,
-                                        thoughtSignature = part["thoughtSignature"]?.asText(),
-                                        id = fc["id"]?.asText()
-                                )
-                        } else {
+                                        functionCalls.add(
+                                                GeminiResult.FunctionCall(
+                                                        toolName = fc["name"].asText(),
+                                                        args = args,
+                                                        thoughtSignature =
+                                                                part["thoughtSignature"]?.asText(),
+                                                        id = fc["id"]?.asText()
+                                                )
+                                        )
+                                } else if (part.has("text")) {
 
-                                GeminiResult.TextResponse(text = part["text"].asText())
+                                        textResponse = part["text"].asText()
+                                }
+                        }
+
+                        return when {
+                                functionCalls.isNotEmpty() ->
+                                        GeminiResult.FunctionCalls(functionCalls)
+                                textResponse != null -> GeminiResult.TextResponse(textResponse!!)
+                                else -> GeminiResult.TextResponse("")
                         }
                 }
         }
@@ -286,10 +300,8 @@ class GeminiClient(
                 }
 
                 return try {
-
                         mapper.readValue(argsText, Map::class.java) as Map<String, Any?>
                 } catch (_: Exception) {
-
                         emptyMap()
                 }
         }
