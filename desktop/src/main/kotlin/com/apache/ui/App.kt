@@ -16,6 +16,9 @@ package com.apache.ui
 
 // Manejo de eventos de teclado (por ejemplo, Enter para enviar).
 
+// Permite seleccionar y copiar texto en Compose.
+
+// Tipos de datos para representar mensajes y peticiones/respuestas del Core.
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -35,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -147,7 +151,8 @@ fun App() {
     // Indica si Apache está esperando una respuesta del Core.
 
     var isLoading by remember { mutableStateOf(false) }
-
+    // Indica si debemos mostrar "Pensando..." mientras esperamos la respuesta del Core.
+    var showThinking by remember { mutableStateOf(false) }
     /** Coroutine scope utilizado para ejecutar la petición sin bloquear la interfaz gráfica. */
     val scope = rememberCoroutineScope()
 
@@ -174,7 +179,16 @@ fun App() {
             // Mostramos "Pensando...".
 
             isLoading = true
-
+            // Inicialmente no mostramos "Pensando..." hasta que pasen 400ms.
+            showThinking = false
+            // Iniciamos un temporizador para mostrar "Pensando..." si la respuesta tarda más de
+            // 400ms.
+            scope.launch {
+                delay(400)
+                if (isLoading) {
+                    showThinking = true
+                }
+            }
             /** Ejecutamos la petición en un hilo secundario para no bloquear Compose. */
             scope.launch(Dispatchers.IO) {
                 try {
@@ -206,6 +220,9 @@ fun App() {
                         // Dejamos de mostrar "Pensando...".
 
                         isLoading = false
+                        // Dejamos de mostrar "Pensando..." aunque la respuesta haya llegado antes
+                        // de 400ms.
+                        showThinking = false
                     }
                 } catch (e: Exception) {
 
@@ -305,7 +322,7 @@ fun App() {
 
                         // Mientras esperamos al Core mostramos esto.
 
-                        if (isLoading) {
+                        if (showThinking) {
                             item { MessageBubble(ChatMessage("Pensando...", false)) }
                         }
                     }
