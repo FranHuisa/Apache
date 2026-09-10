@@ -1,60 +1,132 @@
 package com.apache.tools
 
-import com.apache.tools.RiskLevel
-import com.apache.tools.Tool
+import com.apache.tools.application.ApplicationSource
+import com.apache.tools.application.ApplicationSourceManager
+
 import org.springframework.stereotype.Component
 
 /**
- * Ejemplo de tool de riesgo REVERSIBLE: tiene un efecto real en el sistema
- * (lanza un proceso), pero es una acción benigna y fácil de deshacer
- * (cerrar la app), así que se ejecuta directamente sin pedir confirmación
- * (ver PermissionManager). Sí queda registrada en el log del agente.
+ * Tool que controla aplicaciones desde Apache: abrir, cerrar y consultar
+ * si una aplicación está ejecutándose.
  *
- * IMPORTANTE (seguridad): la lista `allowedApps` es una allowlist explícita
- * a propósito. NUNCA se debe construir el comando a partir de una ruta o
- * nombre arbitrario que venga directamente de Gemini/el usuario sin pasar
- * por esta validación — eso es exactamente el escenario "ejecuta cualquier
- * comando de Windows" que el diseño original quiere evitar.
+ * Riesgo REVERSIBLE: abrir una aplicación no supone un riesgo relevante.
+ * Cerrar una aplicación puede provocar pérdida de cambios no guardados,
+ * por lo que posteriormente podremos añadir confirmación para esta acción.
+ *
+ * IMPORTANTE (diseño): esta tool NO sabe cómo trabajar directamente con
+ * Windows ni con una aplicación concreta. Solo conoce la interfaz
+ * [ApplicationSource] y delega en [ApplicationSourceManager].
  */
 @Component
-class OpenApplicationTool : Tool {
-    override val name = "openApplication"
-    override val description =
-        "Abre una aplicación instalada en el ordenador. Solo funciona con aplicaciones de la lista permitida."
-    override val riskLevel = RiskLevel.REVERSIBLE
-    override val parametersSchema: Map<String, Any?> = mapOf(
-        "type" to "object",
-        "properties" to mapOf(
-            "appName" to mapOf(
-                "type" to "string",
-                "description" to "Nombre de la aplicación a abrir, ej: 'chrome', 'calculadora', 'bloc de notas'."
-            )
-        ),
-        "required" to listOf("appName")
-    )
+class OpenApplicationTool(
+    private val sourceManager: ApplicationSourceManager
+) : Tool {
 
-    // Allowlist: nombre lógico -> comando real del sistema operativo.
-    // En la Fase 3 esto se ampliaría y se detectaría el SO automáticamente.
-    private val allowedApps = mapOf(
-        "chrome" to "google-chrome",
-        "calculadora" to "gnome-calculator",
-        "bloc de notas" to "gedit",
-        "terminal" to "gnome-terminal"
-    )
+    override val name = "applicationControl"
+
+    override val description =
+        "Controla aplicaciones del ordenador: abrir una aplicación, cerrar una aplicación " +
+                "o comprobar si una aplicación está abierta."
+
+    override val riskLevel = RiskLevel.REVERSIBLE
+
+    override val requiresGeminiResponse = false
+
+    override val parametersSchema: Map<String, Any?> =
+        mapOf(
+            "type" to "object",
+            "properties" to
+                mapOf(
+                    "action" to
+                        mapOf(
+                            "type" to "string",
+                            "description" to
+                                "Acción a realizar sobre una aplicación.",
+                            "enum" to
+                                listOf(
+                                    "open",
+                                    "close",
+                                    "status"
+                                )
+                        ),
+                    "application" to
+                        mapOf(
+                            "type" to "string",
+                            "description" to
+                                "Nombre de la aplicación sobre la que realizar la acción."
+                        )
+                ),
+            "required" to listOf("action", "application")
+        )
 
     override fun execute(args: Map<String, Any?>): String {
-        val requested = (args["appName"] as? String)?.lowercase()?.trim()
-            ?: return "No se ha especificado qué aplicación abrir."
 
-        val command = allowedApps[requested]
-            ?: return "'$requested' no está en la lista de aplicaciones permitidas. " +
-                "Aplicaciones disponibles: ${allowedApps.keys.joinToString(", ")}."
+        val action =
+            (args["action"] as? String)?.trim()
+                ?: return "No se ha especificado ninguna acción."
 
-        return try {
-            ProcessBuilder(command).start()
-            "He abierto $requested."
-        } catch (e: Exception) {
-            "No he podido abrir $requested: ${e.message}"
+        val application =
+            (args["application"] as? String)?.trim()
+                ?: return "No se ha especificado ninguna aplicación."
+
+        if (application.isBlank()) {
+            return "No se ha especificado ninguna aplicación."
+        }
+
+        val source = sourceManager.activeSource()
+
+        if (source.id == "none") {
+            return "No hay ninguna fuente de aplicaciones disponible."
+        }
+
+        return when (action) {
+
+            "open" ->
+                resultOf(
+                    source.open(application),
+                    "Abierta.",
+                    action,
+                    application
+                )
+
+            "close" ->
+                resultOf(
+                    source.close(application),
+                    "Cerrada.",
+                    action,
+                    application
+                )
+
+            "status" -> {
+                if (source.isRunning(application)) {
+                    "Está abierta."
+                } else {
+                    "No está abierta."
+                }
+            }
+
+            else ->
+                "Acción '$action' no reconocida. Acciones disponibles: open, close, status."
         }
     }
+
+    private fun resultOf(
+        success: Boolean,
+        successMessage: String,
+        action: String,
+        application: String
+    ): String {
+        return if (success) {
+            successMessage
+        } else {
+            "No he podido ${describeAction(action)} ${application.lowercase()}."
+        }
+    }
+
+    private fun describeAction(action: String): String =
+        when (action) {
+            "open" -> "abrir"
+            "close" -> "cerrar"
+            else -> "controlar"
+        }
 }
