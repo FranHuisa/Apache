@@ -39,17 +39,15 @@ data class ChatRequest(val conversationId: String? = null, val message: String)
 
 // DTO que recibimos del Core.
 data class ChatResponse(
-    val conversationId: String,
-    val reply: String? = null,
-    val needsConfirmation: Boolean = false,
-    val confirmationId: String? = null,
-    val warning: String? = null
+        val conversationId: String,
+        val reply: String? = null,
+        val needsConfirmation: Boolean = false,
+        val confirmationId: String? = null,
+        val warning: String? = null
 )
 
 // DTO que recibimos del endpoint de transcripción.
-data class VoiceTranscriptionResponse(
-    val text: String
-)
+data class VoiceTranscriptionResponse(val text: String)
 
 // Cliente HTTP que utilizará Apache Desktop.
 private val httpClient = OkHttpClient()
@@ -72,16 +70,16 @@ private fun sendMessageToCore(conversationId: String?, message: String): ChatRes
 
     // Convertimos nuestro ChatRequest a JSON.
     val json =
-        objectMapper.writeValueAsString(
-            ChatRequest(conversationId = conversationId, message = message)
-        )
+            objectMapper.writeValueAsString(
+                    ChatRequest(conversationId = conversationId, message = message)
+            )
 
     // Construimos la petición.
     val request =
-        Request.Builder()
-            .url("http://localhost:8080/api/chat")
-            .post(json.toRequestBody(jsonMediaType))
-            .build()
+            Request.Builder()
+                    .url("http://localhost:8080/api/chat")
+                    .post(json.toRequestBody(jsonMediaType))
+                    .build()
 
     // Ejecutamos la petición y esperamos la respuesta.
     httpClient.newCall(request).execute().use { response ->
@@ -93,8 +91,7 @@ private fun sendMessageToCore(conversationId: String?, message: String): ChatRes
 
         // Obtenemos el cuerpo de la respuesta.
         val responseBody =
-            response.body?.string()
-                ?: throw Exception("El Core no devolvió ninguna respuesta.")
+                response.body?.string() ?: throw Exception("El Core no devolvió ninguna respuesta.")
 
         // Convertimos el JSON recibido en ChatResponse.
         return objectMapper.readValue(responseBody)
@@ -109,45 +106,34 @@ private fun sendMessageToCore(conversationId: String?, message: String): ChatRes
 private fun transcribeAudio(audioData: ByteArray): VoiceTranscriptionResponse {
 
     // Creamos el cuerpo binario con el audio PCM.
-    val audioBody =
-        audioData.toRequestBody(
-            "audio/L16;rate=16000".toMediaType()
-        )
+    val audioBody = audioData.toRequestBody("audio/L16;rate=16000".toMediaType())
 
     // Construimos la petición multipart.
     val requestBody =
-        MultipartBody.Builder()
-            .setType(MultipartBody.FORM)
-            .addFormDataPart(
-                "audio",
-                "recording.pcm",
-                audioBody
-            )
-            .build()
+            MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("audio", "recording.pcm", audioBody)
+                    .build()
 
     // Construimos la petición.
     val request =
-        Request.Builder()
-            .url("http://localhost:8080/api/voice/transcribe")
-            .post(requestBody)
-            .build()
+            Request.Builder()
+                    .url("http://localhost:8080/api/voice/transcribe")
+                    .post(requestBody)
+                    .build()
 
     // Ejecutamos la petición.
     httpClient.newCall(request).execute().use { response ->
 
         // Si el Core devuelve un error HTTP, lanzamos una excepción.
         if (!response.isSuccessful) {
-            throw Exception(
-                "El Core respondió con HTTP ${response.code}"
-            )
+            throw Exception("El Core respondió con HTTP ${response.code}")
         }
 
         // Obtenemos el cuerpo de la respuesta.
         val responseBody =
-            response.body?.string()
-                ?: throw Exception(
-                    "El Core no devolvió ninguna transcripción."
-                )
+                response.body?.string()
+                        ?: throw Exception("El Core no devolvió ninguna transcripción.")
 
         // Convertimos la respuesta en nuestro DTO.
         return objectMapper.readValue(responseBody)
@@ -172,10 +158,10 @@ fun App() {
     // Lista de mensajes que aparecen en pantalla.
     var messages by remember {
         mutableStateOf(
-            listOf(
-                // Mensaje inicial de Apache.
-                ChatMessage("Hola. Soy Apache. ¿En qué puedo ayudarte?", false)
-            )
+                listOf(
+                        // Mensaje inicial de Apache.
+                        ChatMessage("Hola. Soy Apache. ¿En qué puedo ayudarte?", false)
+                )
         )
     }
 
@@ -211,6 +197,58 @@ fun App() {
         }
     }
 
+    fun processMessage(text: String) {
+
+        if (text.isBlank() || isLoading) {
+            return
+        }
+
+        messages = messages + ChatMessage(text, true)
+
+        isLoading = true
+        showThinking = false
+
+        scope.launch {
+            delay(400)
+
+            if (isLoading) {
+                showThinking = true
+            }
+        }
+
+        scope.launch(Dispatchers.IO) {
+            try {
+
+                val response = sendMessageToCore(conversationId, text)
+
+                launch(Dispatchers.Main) {
+                    conversationId = response.conversationId
+
+                    val reply =
+                            response.reply
+                                    ?: response.warning ?: "Apache no devolvió una respuesta."
+
+                    messages = messages + ChatMessage(reply, false)
+
+                    isLoading = false
+                    showThinking = false
+                }
+            } catch (e: Exception) {
+
+                launch(Dispatchers.Main) {
+                    messages =
+                            messages +
+                                    ChatMessage(
+                                            "No puedo conectar con Apache Core: ${e.message}",
+                                            false
+                                    )
+
+                    isLoading = false
+                    showThinking = false
+                }
+            }
+        }
+    }
     // Inicia o detiene la grabación del micrófono.
     fun toggleRecording() {
 
@@ -219,314 +257,183 @@ fun App() {
             isRecording = true
 
             scope.launch(Dispatchers.IO) {
-
                 try {
 
                     microphoneRecorder.start()
-
                 } catch (e: Exception) {
 
                     launch(Dispatchers.Main) {
-
                         isRecording = false
 
                         messages =
-                            messages +
-                                ChatMessage(
-                                    "No se ha podido acceder al micrófono: ${e.message}",
-                                    false
-                                )
+                                messages +
+                                        ChatMessage(
+                                                "No se ha podido acceder al micrófono: ${e.message}",
+                                                false
+                                        )
                     }
                 }
-
             }
-
         } else {
 
             scope.launch(Dispatchers.IO) {
-
                 try {
 
                     val audio = microphoneRecorder.stop()
 
-                    launch(Dispatchers.Main) {
-                        isRecording = false
-                    }
+                    launch(Dispatchers.Main) { isRecording = false }
 
                     if (audio.isEmpty()) {
 
                         launch(Dispatchers.Main) {
-
                             messages =
-                                messages +
-                                    ChatMessage(
-                                        "No se ha podido obtener ninguna grabación.",
-                                        false
-                                    )
+                                    messages +
+                                            ChatMessage(
+                                                    "No se ha podido obtener ninguna grabación.",
+                                                    false
+                                            )
                         }
 
                         return@launch
                     }
 
                     // Guardamos la última grabación realizada.
-                    launch(Dispatchers.Main) {
-                        recordedAudio = audio
-                    }
+                    launch(Dispatchers.Main) { recordedAudio = audio }
 
                     // Enviamos el audio al Core para obtener la transcripción.
-                    val transcription =
-                        transcribeAudio(audio)
+                    val transcription = transcribeAudio(audio)
 
-                    val text =
-                        transcription.text.trim()
+                    val text = transcription.text.trim()
 
                     launch(Dispatchers.Main) {
-
                         if (text.isNotBlank()) {
-
-                            // Mostramos la transcripción como mensaje del usuario.
-                            messages =
-                                messages +
-                                    ChatMessage(
-                                        text,
-                                        true
-                                    )
-
+                            processMessage(text)
                         } else {
-
                             messages =
-                                messages +
-                                    ChatMessage(
-                                        "No he podido reconocer lo que has dicho.",
-                                        false
-                                    )
+                                    messages +
+                                            ChatMessage(
+                                                    "No he podido reconocer lo que has dicho.",
+                                                    false
+                                            )
                         }
                     }
-
                 } catch (e: Exception) {
 
                     launch(Dispatchers.Main) {
-
                         isRecording = false
 
                         messages =
-                            messages +
-                                ChatMessage(
-                                    "No se ha podido transcribir el audio: ${e.message}",
-                                    false
-                                )
+                                messages +
+                                        ChatMessage(
+                                                "No se ha podido transcribir el audio: ${e.message}",
+                                                false
+                                        )
                     }
                 }
             }
         }
     }
-
     // Función que envía el mensaje tanto desde el botón como desde Enter.
     fun sendMessage() {
 
-        // Quitamos espacios al principio y final.
         val text = message.trim()
 
-        // No hacemos nada si está vacío o Apache está ocupado.
         if (text.isNotBlank() && !isLoading) {
 
-            // Añadimos el mensaje del usuario al chat.
-            messages = messages + ChatMessage(text, true)
-
-            // Limpiamos el campo de texto.
             message = ""
 
-            // Mostramos "Pensando...".
-            isLoading = true
-
-            // Inicialmente no mostramos "Pensando..." hasta que pasen 400ms.
-            showThinking = false
-
-            // Iniciamos un temporizador para mostrar "Pensando..." si la respuesta tarda más de
-            // 400ms.
-            scope.launch {
-
-                delay(400)
-
-                if (isLoading) {
-                    showThinking = true
-                }
-            }
-
-            // Ejecutamos la petición en un hilo secundario para no bloquear Compose.
-            scope.launch(Dispatchers.IO) {
-
-                try {
-
-                    // Enviamos el mensaje al Core.
-                    val response =
-                        sendMessageToCore(
-                            conversationId,
-                            text
-                        )
-
-                    // Volvemos al hilo principal para actualizar la interfaz.
-                    launch(Dispatchers.Main) {
-
-                        // Guardamos el ID de conversación.
-                        conversationId = response.conversationId
-
-                        /**
-                         * Normalmente recibiremos "reply".
-                         *
-                         * Si el Core solicita confirmación, utilizamos temporalmente el warning.
-                         */
-                        val reply =
-                            response.reply
-                                ?: response.warning
-                                ?: "Apache no devolvió una respuesta."
-
-                        // Añadimos la respuesta de Apache.
-                        messages =
-                            messages +
-                                ChatMessage(
-                                    reply,
-                                    false
-                                )
-
-                        // Dejamos de mostrar "Pensando...".
-                        isLoading = false
-
-                        // Dejamos de mostrar "Pensando..." aunque la respuesta haya llegado antes
-                        // de 400ms.
-                        showThinking = false
-                    }
-
-                } catch (e: Exception) {
-
-                    // Si no podemos conectar con el Core, mostramos el error en el propio chat.
-                    launch(Dispatchers.Main) {
-
-                        messages =
-                            messages +
-                                ChatMessage(
-                                    "No puedo conectar con Apache Core: ${e.message}",
-                                    false
-                                )
-
-                        isLoading = false
-                        showThinking = false
-                    }
-                }
-            }
+            processMessage(text)
         }
     }
 
     MaterialTheme {
 
         // Fondo principal de la aplicación.
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = Color(0xFF121212)
-        ) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF121212)) {
 
             // Layout principal: barra lateral + contenido.
-            Row(
-                modifier = Modifier.fillMaxSize()
-            ) {
+            Row(modifier = Modifier.fillMaxSize()) {
 
                 // =========================================================
                 // BARRA LATERAL
                 // =========================================================
 
                 Column(
-                    modifier =
-                        Modifier
-                            .width(220.dp)
-                            .fillMaxHeight()
-                            .background(Color(0xFF181818))
-                            .padding(20.dp)
+                        modifier =
+                                Modifier.width(220.dp)
+                                        .fillMaxHeight()
+                                        .background(Color(0xFF181818))
+                                        .padding(20.dp)
                 ) {
 
                     // Nombre de Apache.
-                    Text(
-                        text = "APACHE",
-                        color = Color(0xFF1DB954),
-                        fontSize = 24.sp
-                    )
+                    Text(text = "APACHE", color = Color(0xFF1DB954), fontSize = 24.sp)
 
                     Spacer(modifier = Modifier.height(30.dp))
 
                     // Sección Chat.
                     Text(
-                        text = "Chat",
-                        color =
-                            if (selectedSection == "Chat") {
-                                Color.White
-                            } else {
-                                Color(0xFFAAAAAA)
-                            },
-                        fontSize = 16.sp,
-                        modifier = Modifier.clickable {
-                            selectedSection = "Chat"
-                        }
+                            text = "Chat",
+                            color =
+                                    if (selectedSection == "Chat") {
+                                        Color.White
+                                    } else {
+                                        Color(0xFFAAAAAA)
+                                    },
+                            fontSize = 16.sp,
+                            modifier = Modifier.clickable { selectedSection = "Chat" }
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Sección Memoria.
                     Text(
-                        text = "Memoria",
-                        color =
-                            if (selectedSection == "Memoria") {
-                                Color.White
-                            } else {
-                                Color(0xFFAAAAAA)
-                            },
-                        fontSize = 16.sp,
-                        modifier = Modifier.clickable {
-                            selectedSection = "Memoria"
-                        }
+                            text = "Memoria",
+                            color =
+                                    if (selectedSection == "Memoria") {
+                                        Color.White
+                                    } else {
+                                        Color(0xFFAAAAAA)
+                                    },
+                            fontSize = 16.sp,
+                            modifier = Modifier.clickable { selectedSection = "Memoria" }
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Sección Herramientas.
                     Text(
-                        text = "Herramientas",
-                        color =
-                            if (selectedSection == "Herramientas") {
-                                Color.White
-                            } else {
-                                Color(0xFFAAAAAA)
-                            },
-                        fontSize = 16.sp,
-                        modifier = Modifier.clickable {
-                            selectedSection = "Herramientas"
-                        }
+                            text = "Herramientas",
+                            color =
+                                    if (selectedSection == "Herramientas") {
+                                        Color.White
+                                    } else {
+                                        Color(0xFFAAAAAA)
+                                    },
+                            fontSize = 16.sp,
+                            modifier = Modifier.clickable { selectedSection = "Herramientas" }
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Sección Ayuda.
                     Text(
-                        text = "Ayuda",
-                        color =
-                            if (selectedSection == "Ayuda") {
-                                Color.White
-                            } else {
-                                Color(0xFFAAAAAA)
-                            },
-                        fontSize = 16.sp,
-                        modifier = Modifier.clickable {
-                            selectedSection = "Ayuda"
-                        }
+                            text = "Ayuda",
+                            color =
+                                    if (selectedSection == "Ayuda") {
+                                        Color.White
+                                    } else {
+                                        Color(0xFFAAAAAA)
+                                    },
+                            fontSize = 16.sp,
+                            modifier = Modifier.clickable { selectedSection = "Ayuda" }
                     )
 
                     // Empuja la versión hacia la parte inferior.
                     Spacer(modifier = Modifier.weight(1f))
 
                     // Versión actual de Apache.
-                    Text(
-                        text = "Apache 0.1.0",
-                        color = Color(0xFF666666),
-                        fontSize = 12.sp
-                    )
+                    Text(text = "Apache 0.1.0", color = Color(0xFF666666), fontSize = 12.sp)
                 }
 
                 // =========================================================
@@ -542,19 +449,10 @@ fun App() {
                     "Chat" -> {
 
                         // Zona principal del chat.
-                        Column(
-                            modifier =
-                                Modifier
-                                    .fillMaxSize()
-                                    .padding(24.dp)
-                        ) {
+                        Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
 
                             // Título.
-                            Text(
-                                text = "Asistente",
-                                color = Color.White,
-                                fontSize = 22.sp
-                            )
+                            Text(text = "Asistente", color = Color.White, fontSize = 22.sp)
 
                             Spacer(modifier = Modifier.height(20.dp))
 
@@ -563,26 +461,17 @@ fun App() {
                             // =====================================================
 
                             LazyColumn(
-                                state = chatListState,
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                    state = chatListState,
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
 
                                 // Dibujamos todos los mensajes.
-                                items(messages) { chatMessage ->
-                                    MessageBubble(chatMessage)
-                                }
+                                items(messages) { chatMessage -> MessageBubble(chatMessage) }
 
                                 // Mientras esperamos al Core mostramos esto.
                                 if (showThinking) {
-                                    item {
-                                        MessageBubble(
-                                            ChatMessage(
-                                                "Pensando...",
-                                                false
-                                            )
-                                        )
-                                    }
+                                    item { MessageBubble(ChatMessage("Pensando...", false)) }
                                 }
                             }
 
@@ -593,44 +482,35 @@ fun App() {
                             // =====================================================
 
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
                             ) {
 
                                 // Campo donde escribe el usuario.
                                 OutlinedTextField(
-                                    value = message,
-                                    onValueChange = { message = it },
-                                    modifier = Modifier.weight(1f),
-                                    keyboardOptions =
-                                        KeyboardOptions(
-                                            imeAction = ImeAction.Send
-                                        ),
-                                    keyboardActions =
-                                        KeyboardActions(
-                                            onSend = {
-                                                sendMessage()
-                                            }
-                                        ),
-                                    placeholder = {
-                                        Text("Escribe un mensaje...")
-                                    },
-                                    singleLine = true,
+                                        value = message,
+                                        onValueChange = { message = it },
+                                        modifier = Modifier.weight(1f),
+                                        keyboardOptions =
+                                                KeyboardOptions(imeAction = ImeAction.Send),
+                                        keyboardActions =
+                                                KeyboardActions(onSend = { sendMessage() }),
+                                        placeholder = { Text("Escribe un mensaje...") },
+                                        singleLine = true,
 
-                                    // Desactivamos el campo mientras Apache piensa.
-                                    enabled = !isLoading && !isRecording,
-
-                                    colors =
-                                        OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            focusedBorderColor = Color(0xFF1DB954),
-                                            unfocusedBorderColor = Color(0xFF444444),
-                                            cursorColor = Color(0xFF1DB954),
-                                            focusedPlaceholderColor = Color(0xFF777777),
-                                            unfocusedPlaceholderColor =
-                                                Color(0xFF777777)
-                                        )
+                                        // Desactivamos el campo mientras Apache piensa.
+                                        enabled = !isLoading && !isRecording,
+                                        colors =
+                                                OutlinedTextFieldDefaults.colors(
+                                                        focusedTextColor = Color.White,
+                                                        unfocusedTextColor = Color.White,
+                                                        focusedBorderColor = Color(0xFF1DB954),
+                                                        unfocusedBorderColor = Color(0xFF444444),
+                                                        cursorColor = Color(0xFF1DB954),
+                                                        focusedPlaceholderColor = Color(0xFF777777),
+                                                        unfocusedPlaceholderColor =
+                                                                Color(0xFF777777)
+                                                )
                                 )
 
                                 Spacer(modifier = Modifier.width(10.dp))
@@ -640,29 +520,26 @@ fun App() {
                                 // =================================================
 
                                 Button(
-                                    enabled = !isLoading,
-                                    onClick = {
-                                        toggleRecording()
-                                    },
-                                    colors =
-                                        ButtonDefaults.buttonColors(
-                                            containerColor =
-                                                if (isRecording) {
-                                                    Color(0xFFAA2222)
-                                                } else {
-                                                    Color(0xFF1DB954)
-                                                }
-                                        )
+                                        enabled = !isLoading,
+                                        onClick = { toggleRecording() },
+                                        colors =
+                                                ButtonDefaults.buttonColors(
+                                                        containerColor =
+                                                                if (isRecording) {
+                                                                    Color(0xFFAA2222)
+                                                                } else {
+                                                                    Color(0xFF1DB954)
+                                                                }
+                                                )
                                 ) {
-
                                     Text(
-                                        text =
-                                            if (isRecording) {
-                                                "Detener"
-                                            } else {
-                                                "Micrófono"
-                                            },
-                                        color = Color.Black
+                                            text =
+                                                    if (isRecording) {
+                                                        "Detener"
+                                                    } else {
+                                                        "Micrófono"
+                                                    },
+                                            color = Color.Black
                                     )
                                 }
 
@@ -673,25 +550,18 @@ fun App() {
                                 // =================================================
 
                                 Button(
-                                    // Desactivamos el botón mientras esperamos.
-                                    enabled = !isLoading && !isRecording,
+                                        // Desactivamos el botón mientras esperamos.
+                                        enabled = !isLoading && !isRecording,
 
-                                    // Utilizamos la misma función que Enter.
-                                    onClick = {
-                                        sendMessage()
-                                    },
+                                        // Utilizamos la misma función que Enter.
+                                        onClick = { sendMessage() },
 
-                                    // Color verde de Apache.
-                                    colors =
-                                        ButtonDefaults.buttonColors(
-                                            containerColor = Color(0xFF1DB954)
-                                        )
-                                ) {
-                                    Text(
-                                        text = "Enviar",
-                                        color = Color.Black
-                                    )
-                                }
+                                        // Color verde de Apache.
+                                        colors =
+                                                ButtonDefaults.buttonColors(
+                                                        containerColor = Color(0xFF1DB954)
+                                                )
+                                ) { Text(text = "Enviar", color = Color.Black) }
                             }
                         }
                     }
@@ -702,27 +572,18 @@ fun App() {
 
                     "Memoria" -> {
 
-                        Column(
-                            modifier =
-                                Modifier
-                                    .fillMaxSize()
-                                    .padding(24.dp)
-                        ) {
+                        Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
 
                             // Título de la sección.
-                            Text(
-                                text = "Memoria",
-                                color = Color.White,
-                                fontSize = 22.sp
-                            )
+                            Text(text = "Memoria", color = Color.White, fontSize = 22.sp)
 
                             Spacer(modifier = Modifier.height(20.dp))
 
                             // Estado actual de la sección.
                             Text(
-                                text = "La memoria de Apache estará disponible próximamente.",
-                                color = Color(0xFFAAAAAA),
-                                fontSize = 15.sp
+                                    text = "La memoria de Apache estará disponible próximamente.",
+                                    color = Color(0xFFAAAAAA),
+                                    fontSize = 15.sp
                             )
                         }
                     }
@@ -733,86 +594,61 @@ fun App() {
 
                     "Herramientas" -> {
 
-                        Column(
-                            modifier =
-                                Modifier
-                                    .fillMaxSize()
-                                    .padding(24.dp)
-                        ) {
+                        Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
 
                             // Título de la sección.
-                            Text(
-                                text = "Herramientas",
-                                color = Color.White,
-                                fontSize = 22.sp
-                            )
+                            Text(text = "Herramientas", color = Color.White, fontSize = 22.sp)
 
                             Spacer(modifier = Modifier.height(20.dp))
 
                             // Herramienta de tiempo.
-                            Text(
-                                text = "Tiempo",
-                                color = Color(0xFF1DB954),
-                                fontSize = 17.sp
-                            )
+                            Text(text = "Tiempo", color = Color(0xFF1DB954), fontSize = 17.sp)
 
                             Spacer(modifier = Modifier.height(6.dp))
 
                             Text(
-                                text = "Consulta el tiempo actual y la previsión.",
-                                color = Color(0xFFAAAAAA),
-                                fontSize = 15.sp
+                                    text = "Consulta el tiempo actual y la previsión.",
+                                    color = Color(0xFFAAAAAA),
+                                    fontSize = 15.sp
                             )
 
                             Spacer(modifier = Modifier.height(18.dp))
 
                             // Herramienta de música.
-                            Text(
-                                text = "Música",
-                                color = Color(0xFF1DB954),
-                                fontSize = 17.sp
-                            )
+                            Text(text = "Música", color = Color(0xFF1DB954), fontSize = 17.sp)
 
                             Spacer(modifier = Modifier.height(6.dp))
 
                             Text(
-                                text = "Controla la reproducción y el volumen.",
-                                color = Color(0xFFAAAAAA),
-                                fontSize = 15.sp
+                                    text = "Controla la reproducción y el volumen.",
+                                    color = Color(0xFFAAAAAA),
+                                    fontSize = 15.sp
                             )
 
                             Spacer(modifier = Modifier.height(18.dp))
 
                             // Herramienta de aplicaciones.
-                            Text(
-                                text = "Aplicaciones",
-                                color = Color(0xFF1DB954),
-                                fontSize = 17.sp
-                            )
+                            Text(text = "Aplicaciones", color = Color(0xFF1DB954), fontSize = 17.sp)
 
                             Spacer(modifier = Modifier.height(6.dp))
 
                             Text(
-                                text = "Abre, cierra y consulta aplicaciones.",
-                                color = Color(0xFFAAAAAA),
-                                fontSize = 15.sp
+                                    text = "Abre, cierra y consulta aplicaciones.",
+                                    color = Color(0xFFAAAAAA),
+                                    fontSize = 15.sp
                             )
 
                             Spacer(modifier = Modifier.height(18.dp))
 
                             // Herramienta de sistema.
-                            Text(
-                                text = "Sistema",
-                                color = Color(0xFF1DB954),
-                                fontSize = 17.sp
-                            )
+                            Text(text = "Sistema", color = Color(0xFF1DB954), fontSize = 17.sp)
 
                             Spacer(modifier = Modifier.height(6.dp))
 
                             Text(
-                                text = "Consulta los recursos del ordenador.",
-                                color = Color(0xFFAAAAAA),
-                                fontSize = 15.sp
+                                    text = "Consulta los recursos del ordenador.",
+                                    color = Color(0xFFAAAAAA),
+                                    fontSize = 15.sp
                             )
                         }
                     }
@@ -823,35 +659,26 @@ fun App() {
 
                     "Ayuda" -> {
 
-                        Column(
-                            modifier =
-                                Modifier
-                                    .fillMaxSize()
-                                    .padding(24.dp)
-                        ) {
+                        Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
 
                             // Título de la sección.
-                            Text(
-                                text = "Ayuda",
-                                color = Color.White,
-                                fontSize = 22.sp
-                            )
+                            Text(text = "Ayuda", color = Color.White, fontSize = 22.sp)
 
                             Spacer(modifier = Modifier.height(20.dp))
 
                             // Introducción.
                             Text(
-                                text = "¿Qué puedo pedirle a Apache?",
-                                color = Color.White,
-                                fontSize = 17.sp
+                                    text = "¿Qué puedo pedirle a Apache?",
+                                    color = Color.White,
+                                    fontSize = 17.sp
                             )
 
                             Spacer(modifier = Modifier.height(8.dp))
 
                             Text(
-                                text = "Puedes pedirle acciones utilizando lenguaje natural.",
-                                color = Color(0xFFAAAAAA),
-                                fontSize = 15.sp
+                                    text = "Puedes pedirle acciones utilizando lenguaje natural.",
+                                    color = Color(0xFFAAAAAA),
+                                    fontSize = 15.sp
                             )
 
                             Spacer(modifier = Modifier.height(24.dp))
@@ -860,36 +687,28 @@ fun App() {
                             // EJEMPLOS DE MÚSICA
                             // =================================================
 
-                            Text(
-                                text = "Música",
-                                color = Color(0xFF1DB954),
-                                fontSize = 17.sp
-                            )
+                            Text(text = "Música", color = Color(0xFF1DB954), fontSize = 17.sp)
 
                             Spacer(modifier = Modifier.height(6.dp))
 
+                            Text(text = "«Pon música»", color = Color(0xFFCCCCCC), fontSize = 15.sp)
+
                             Text(
-                                text = "«Pon música»",
-                                color = Color(0xFFCCCCCC),
-                                fontSize = 15.sp
+                                    text = "«Pausa la música»",
+                                    color = Color(0xFFCCCCCC),
+                                    fontSize = 15.sp
                             )
 
                             Text(
-                                text = "«Pausa la música»",
-                                color = Color(0xFFCCCCCC),
-                                fontSize = 15.sp
+                                    text = "«Sube el volumen»",
+                                    color = Color(0xFFCCCCCC),
+                                    fontSize = 15.sp
                             )
 
                             Text(
-                                text = "«Sube el volumen»",
-                                color = Color(0xFFCCCCCC),
-                                fontSize = 15.sp
-                            )
-
-                            Text(
-                                text = "«¿Qué está sonando?»",
-                                color = Color(0xFFCCCCCC),
-                                fontSize = 15.sp
+                                    text = "«¿Qué está sonando?»",
+                                    color = Color(0xFFCCCCCC),
+                                    fontSize = 15.sp
                             )
 
                             Spacer(modifier = Modifier.height(20.dp))
@@ -898,36 +717,32 @@ fun App() {
                             // EJEMPLOS DE APLICACIONES
                             // =================================================
 
-                            Text(
-                                text = "Aplicaciones",
-                                color = Color(0xFF1DB954),
-                                fontSize = 17.sp
-                            )
+                            Text(text = "Aplicaciones", color = Color(0xFF1DB954), fontSize = 17.sp)
 
                             Spacer(modifier = Modifier.height(6.dp))
 
                             Text(
-                                text = "«Abre Discord»",
-                                color = Color(0xFFCCCCCC),
-                                fontSize = 15.sp
+                                    text = "«Abre Discord»",
+                                    color = Color(0xFFCCCCCC),
+                                    fontSize = 15.sp
                             )
 
                             Text(
-                                text = "«Abre Discord y la calculadora»",
-                                color = Color(0xFFCCCCCC),
-                                fontSize = 15.sp
+                                    text = "«Abre Discord y la calculadora»",
+                                    color = Color(0xFFCCCCCC),
+                                    fontSize = 15.sp
                             )
 
                             Text(
-                                text = "«Cierra Discord»",
-                                color = Color(0xFFCCCCCC),
-                                fontSize = 15.sp
+                                    text = "«Cierra Discord»",
+                                    color = Color(0xFFCCCCCC),
+                                    fontSize = 15.sp
                             )
 
                             Text(
-                                text = "«¿Está abierto Visual Studio Code?»",
-                                color = Color(0xFFCCCCCC),
-                                fontSize = 15.sp
+                                    text = "«¿Está abierto Visual Studio Code?»",
+                                    color = Color(0xFFCCCCCC),
+                                    fontSize = 15.sp
                             )
 
                             Spacer(modifier = Modifier.height(20.dp))
@@ -936,18 +751,14 @@ fun App() {
                             // EJEMPLOS DE SISTEMA
                             // =================================================
 
-                            Text(
-                                text = "Sistema",
-                                color = Color(0xFF1DB954),
-                                fontSize = 17.sp
-                            )
+                            Text(text = "Sistema", color = Color(0xFF1DB954), fontSize = 17.sp)
 
                             Spacer(modifier = Modifier.height(6.dp))
 
                             Text(
-                                text = "«¿Qué recursos está usando mi PC?»",
-                                color = Color(0xFFCCCCCC),
-                                fontSize = 15.sp
+                                    text = "«¿Qué recursos está usando mi PC?»",
+                                    color = Color(0xFFCCCCCC),
+                                    fontSize = 15.sp
                             )
 
                             Spacer(modifier = Modifier.height(20.dp))
@@ -956,35 +767,27 @@ fun App() {
                             // EJEMPLOS DE TIEMPO
                             // =================================================
 
-                            Text(
-                                text = "Tiempo",
-                                color = Color(0xFF1DB954),
-                                fontSize = 17.sp
-                            )
+                            Text(text = "Tiempo", color = Color(0xFF1DB954), fontSize = 17.sp)
 
                             Spacer(modifier = Modifier.height(6.dp))
 
                             Text(
-                                text = "«¿Qué tiempo hace mañana?»",
-                                color = Color(0xFFCCCCCC),
-                                fontSize = 15.sp
+                                    text = "«¿Qué tiempo hace mañana?»",
+                                    color = Color(0xFFCCCCCC),
+                                    fontSize = 15.sp
                             )
 
                             Spacer(modifier = Modifier.height(24.dp))
 
                             // Próximas funcionalidades.
-                            Text(
-                                text = "Próximamente",
-                                color = Color.White,
-                                fontSize = 17.sp
-                            )
+                            Text(text = "Próximamente", color = Color.White, fontSize = 17.sp)
 
                             Spacer(modifier = Modifier.height(6.dp))
 
                             Text(
-                                text = "Control por voz",
-                                color = Color(0xFF777777),
-                                fontSize = 15.sp
+                                    text = "Control por voz",
+                                    color = Color(0xFF777777),
+                                    fontSize = 15.sp
                             )
                         }
                     }
@@ -1003,42 +806,36 @@ fun App() {
 fun MessageBubble(message: ChatMessage) {
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement =
-            if (message.isUser) {
-                Arrangement.End
-            } else {
-                Arrangement.Start
-            }
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement =
+                    if (message.isUser) {
+                        Arrangement.End
+                    } else {
+                        Arrangement.Start
+                    }
     ) {
-
         Surface(
-            color =
-                if (message.isUser) {
-                    Color(0xFF1DB954)
-                } else {
-                    Color(0xFF242424)
-                },
-            shape = RoundedCornerShape(12.dp)
+                color =
+                        if (message.isUser) {
+                            Color(0xFF1DB954)
+                        } else {
+                            Color(0xFF242424)
+                        },
+                shape = RoundedCornerShape(12.dp)
         ) {
 
             // Permite seleccionar y copiar el texto del mensaje.
             SelectionContainer {
-
                 Text(
-                    text = message.text,
-                    modifier =
-                        Modifier.padding(
-                            horizontal = 16.dp,
-                            vertical = 10.dp
-                        ),
-                    color =
-                        if (message.isUser) {
-                            Color.Black
-                        } else {
-                            Color.White
-                        },
-                    fontSize = 15.sp
+                        text = message.text,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        color =
+                                if (message.isUser) {
+                                    Color.Black
+                                } else {
+                                    Color.White
+                                },
+                        fontSize = 15.sp
                 )
             }
         }
