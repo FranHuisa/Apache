@@ -293,9 +293,13 @@ fun App() {
             scope.launch(Dispatchers.IO) {
                 try {
 
-                    microphoneRecorder.stop()
+                    val audio = microphoneRecorder.stop()
 
                     launch(Dispatchers.Main) { isRecording = false }
+
+                    if (audio.isNotEmpty()) {
+                        processRecordedAudio(audio)
+                    }
                 } catch (e: Exception) {
 
                     launch(Dispatchers.Main) {
