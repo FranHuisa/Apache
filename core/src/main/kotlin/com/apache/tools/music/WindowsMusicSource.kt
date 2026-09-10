@@ -1,9 +1,13 @@
 package com.apache.tools.music
 
 import net.bjoernpetersen.volctl.VolumeControl
+
 import org.endlesssource.mediainterface.SystemMediaFactory
+
 import org.endlesssource.mediainterface.api.MediaSession
+
 import org.endlesssource.mediainterface.api.SystemMediaInterface
+
 import org.springframework.stereotype.Component
 
 /**
@@ -62,8 +66,35 @@ class WindowsMusicSource : MusicSource {
     }
 
     override fun previous(): Boolean {
-        return executeOnActiveSession { session ->
-            session.getControls().previous()
+        return try {
+            val previousStatus = getStatus()
+
+            val firstAttempt = executeOnActiveSession { session ->
+                session.getControls().previous()
+            }
+
+            if (!firstAttempt) {
+                return false
+            }
+
+            Thread.sleep(300)
+
+            val currentStatus = getStatus()
+
+            val sameTrack =
+                    previousStatus.title != null &&
+                            currentStatus.title == previousStatus.title &&
+                            currentStatus.artist == previousStatus.artist
+
+            if (sameTrack) {
+                executeOnActiveSession { session ->
+                    session.getControls().previous()
+                }
+            } else {
+                true
+            }
+        } catch (_: Exception) {
+            false
         }
     }
 
