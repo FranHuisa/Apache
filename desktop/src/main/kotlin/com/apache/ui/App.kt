@@ -18,12 +18,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.apache.audio.AudioPlayer
+import com.apache.audio.MicrophoneRecorder
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -41,6 +44,11 @@ data class ChatResponse(
     val needsConfirmation: Boolean = false,
     val confirmationId: String? = null,
     val warning: String? = null
+)
+
+// DTO que recibimos del endpoint de transcripción.
+data class VoiceTranscriptionResponse(
+    val text: String
 )
 
 // Cliente HTTP que utilizará Apache Desktop.
@@ -93,6 +101,59 @@ private fun sendMessageToCore(conversationId: String?, message: String): ChatRes
     }
 }
 
+/**
+ * Envía una grabación al Apache Core para convertirla en texto.
+ *
+ * Desktop -> HTTP POST -> Core -> SpeechToTextClient -> Gemini
+ */
+private fun transcribeAudio(audioData: ByteArray): VoiceTranscriptionResponse {
+
+    // Creamos el cuerpo binario con el audio PCM.
+    val audioBody =
+        audioData.toRequestBody(
+            "audio/L16;rate=16000".toMediaType()
+        )
+
+    // Construimos la petición multipart.
+    val requestBody =
+        MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart(
+                "audio",
+                "recording.pcm",
+                audioBody
+            )
+            .build()
+
+    // Construimos la petición.
+    val request =
+        Request.Builder()
+            .url("http://localhost:8080/api/voice/transcribe")
+            .post(requestBody)
+            .build()
+
+    // Ejecutamos la petición.
+    httpClient.newCall(request).execute().use { response ->
+
+        // Si el Core devuelve un error HTTP, lanzamos una excepción.
+        if (!response.isSuccessful) {
+            throw Exception(
+                "El Core respondió con HTTP ${response.code}"
+            )
+        }
+
+        // Obtenemos el cuerpo de la respuesta.
+        val responseBody =
+            response.body?.string()
+                ?: throw Exception(
+                    "El Core no devolvió ninguna transcripción."
+                )
+
+        // Convertimos la respuesta en nuestro DTO.
+        return objectMapper.readValue(responseBody)
+    }
+}
+
 @Composable
 fun App() {
 
@@ -133,10 +194,130 @@ fun App() {
     // Controla la posición del scroll de la conversación.
     val chatListState = rememberLazyListState()
 
+    // Controla la grabación y reproducción de audio.
+    val microphoneRecorder = remember { MicrophoneRecorder() }
+    val audioPlayer = remember { AudioPlayer() }
+
+    // Indica si Apache está grabando desde el micrófono.
+    var isRecording by remember { mutableStateOf(false) }
+
+    // Guarda la última grabación realizada.
+    var recordedAudio by remember { mutableStateOf<ByteArray?>(null) }
+
     // Mantiene el chat desplazado hasta el último mensaje.
     LaunchedEffect(messages.size, showThinking) {
         if (messages.isNotEmpty()) {
             chatListState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
+    // Inicia o detiene la grabación del micrófono.
+    fun toggleRecording() {
+
+        if (!isRecording) {
+
+            isRecording = true
+
+            scope.launch(Dispatchers.IO) {
+
+                try {
+
+                    microphoneRecorder.start()
+
+                } catch (e: Exception) {
+
+                    launch(Dispatchers.Main) {
+
+                        isRecording = false
+
+                        messages =
+                            messages +
+                                ChatMessage(
+                                    "No se ha podido acceder al micrófono: ${e.message}",
+                                    false
+                                )
+                    }
+                }
+
+            }
+
+        } else {
+
+            scope.launch(Dispatchers.IO) {
+
+                try {
+
+                    val audio = microphoneRecorder.stop()
+
+                    launch(Dispatchers.Main) {
+                        isRecording = false
+                    }
+
+                    if (audio.isEmpty()) {
+
+                        launch(Dispatchers.Main) {
+
+                            messages =
+                                messages +
+                                    ChatMessage(
+                                        "No se ha podido obtener ninguna grabación.",
+                                        false
+                                    )
+                        }
+
+                        return@launch
+                    }
+
+                    // Guardamos la última grabación realizada.
+                    launch(Dispatchers.Main) {
+                        recordedAudio = audio
+                    }
+
+                    // Enviamos el audio al Core para obtener la transcripción.
+                    val transcription =
+                        transcribeAudio(audio)
+
+                    val text =
+                        transcription.text.trim()
+
+                    launch(Dispatchers.Main) {
+
+                        if (text.isNotBlank()) {
+
+                            // Mostramos la transcripción como mensaje del usuario.
+                            messages =
+                                messages +
+                                    ChatMessage(
+                                        text,
+                                        true
+                                    )
+
+                        } else {
+
+                            messages =
+                                messages +
+                                    ChatMessage(
+                                        "No he podido reconocer lo que has dicho.",
+                                        false
+                                    )
+                        }
+                    }
+
+                } catch (e: Exception) {
+
+                    launch(Dispatchers.Main) {
+
+                        isRecording = false
+
+                        messages =
+                            messages +
+                                ChatMessage(
+                                    "No se ha podido transcribir el audio: ${e.message}",
+                                    false
+                                )
+                    }
+                }
+            }
         }
     }
 
@@ -161,8 +342,10 @@ fun App() {
             // Inicialmente no mostramos "Pensando..." hasta que pasen 400ms.
             showThinking = false
 
-            // Iniciamos un temporizador para mostrar "Pensando..." si la respuesta tarda más de 400ms.
+            // Iniciamos un temporizador para mostrar "Pensando..." si la respuesta tarda más de
+            // 400ms.
             scope.launch {
+
                 delay(400)
 
                 if (isLoading) {
@@ -176,7 +359,11 @@ fun App() {
                 try {
 
                     // Enviamos el mensaje al Core.
-                    val response = sendMessageToCore(conversationId, text)
+                    val response =
+                        sendMessageToCore(
+                            conversationId,
+                            text
+                        )
 
                     // Volvemos al hilo principal para actualizar la interfaz.
                     launch(Dispatchers.Main) {
@@ -195,7 +382,12 @@ fun App() {
                                 ?: "Apache no devolvió una respuesta."
 
                         // Añadimos la respuesta de Apache.
-                        messages = messages + ChatMessage(reply, false)
+                        messages =
+                            messages +
+                                ChatMessage(
+                                    reply,
+                                    false
+                                )
 
                         // Dejamos de mostrar "Pensando...".
                         isLoading = false
@@ -234,7 +426,9 @@ fun App() {
         ) {
 
             // Layout principal: barra lateral + contenido.
-            Row(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier.fillMaxSize()
+            ) {
 
                 // =========================================================
                 // BARRA LATERAL
@@ -268,10 +462,9 @@ fun App() {
                                 Color(0xFFAAAAAA)
                             },
                         fontSize = 16.sp,
-                        modifier =
-                            Modifier.clickable {
-                                selectedSection = "Chat"
-                            }
+                        modifier = Modifier.clickable {
+                            selectedSection = "Chat"
+                        }
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -286,10 +479,9 @@ fun App() {
                                 Color(0xFFAAAAAA)
                             },
                         fontSize = 16.sp,
-                        modifier =
-                            Modifier.clickable {
-                                selectedSection = "Memoria"
-                            }
+                        modifier = Modifier.clickable {
+                            selectedSection = "Memoria"
+                        }
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -304,10 +496,9 @@ fun App() {
                                 Color(0xFFAAAAAA)
                             },
                         fontSize = 16.sp,
-                        modifier =
-                            Modifier.clickable {
-                                selectedSection = "Herramientas"
-                            }
+                        modifier = Modifier.clickable {
+                            selectedSection = "Herramientas"
+                        }
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -322,10 +513,9 @@ fun App() {
                                 Color(0xFFAAAAAA)
                             },
                         fontSize = 16.sp,
-                        modifier =
-                            Modifier.clickable {
-                                selectedSection = "Ayuda"
-                            }
+                        modifier = Modifier.clickable {
+                            selectedSection = "Ayuda"
+                        }
                     )
 
                     // Empuja la versión hacia la parte inferior.
@@ -387,7 +577,10 @@ fun App() {
                                 if (showThinking) {
                                     item {
                                         MessageBubble(
-                                            ChatMessage("Pensando...", false)
+                                            ChatMessage(
+                                                "Pensando...",
+                                                false
+                                            )
                                         )
                                     }
                                 }
@@ -415,7 +608,9 @@ fun App() {
                                         ),
                                     keyboardActions =
                                         KeyboardActions(
-                                            onSend = { sendMessage() }
+                                            onSend = {
+                                                sendMessage()
+                                            }
                                         ),
                                     placeholder = {
                                         Text("Escribe un mensaje...")
@@ -423,7 +618,7 @@ fun App() {
                                     singleLine = true,
 
                                     // Desactivamos el campo mientras Apache piensa.
-                                    enabled = !isLoading,
+                                    enabled = !isLoading && !isRecording,
 
                                     colors =
                                         OutlinedTextFieldDefaults.colors(
@@ -433,9 +628,43 @@ fun App() {
                                             unfocusedBorderColor = Color(0xFF444444),
                                             cursorColor = Color(0xFF1DB954),
                                             focusedPlaceholderColor = Color(0xFF777777),
-                                            unfocusedPlaceholderColor = Color(0xFF777777)
+                                            unfocusedPlaceholderColor =
+                                                Color(0xFF777777)
                                         )
                                 )
+
+                                Spacer(modifier = Modifier.width(10.dp))
+
+                                // =================================================
+                                // BOTÓN DE VOZ
+                                // =================================================
+
+                                Button(
+                                    enabled = !isLoading,
+                                    onClick = {
+                                        toggleRecording()
+                                    },
+                                    colors =
+                                        ButtonDefaults.buttonColors(
+                                            containerColor =
+                                                if (isRecording) {
+                                                    Color(0xFFAA2222)
+                                                } else {
+                                                    Color(0xFF1DB954)
+                                                }
+                                        )
+                                ) {
+
+                                    Text(
+                                        text =
+                                            if (isRecording) {
+                                                "Detener"
+                                            } else {
+                                                "Micrófono"
+                                            },
+                                        color = Color.Black
+                                    )
+                                }
 
                                 Spacer(modifier = Modifier.width(10.dp))
 
@@ -445,10 +674,12 @@ fun App() {
 
                                 Button(
                                     // Desactivamos el botón mientras esperamos.
-                                    enabled = !isLoading,
+                                    enabled = !isLoading && !isRecording,
 
                                     // Utilizamos la misma función que Enter.
-                                    onClick = { sendMessage() },
+                                    onClick = {
+                                        sendMessage()
+                                    },
 
                                     // Color verde de Apache.
                                     colors =
