@@ -63,6 +63,19 @@ ordenador, además de completar el control multimedia.
 * Solucionado un problema de Kotlin relacionado con el smart cast de una
   variable mutable en `GeminiClient`.
 
+### Mejora de la interfaz
+
+* Añadida navegación lateral entre las secciones `Chat`, `Memoria`,
+  `Herramientas` y `Ayuda`.
+* Creada una sección `Ayuda` con información sobre las capacidades actuales
+  de Apache y ejemplos de comandos que puede utilizar el usuario.
+* Mantenido el diseño visual existente de la aplicación, realizando únicamente
+  cambios complementarios en la interfaz.
+* Mejorada la ventana principal para que se abra centrada en la pantalla.
+* Establecido un tamaño inicial de 1000×700 para mejorar la visualización de
+  las diferentes secciones.
+* Mantenida la posibilidad de redimensionar la ventana.
+
 ### Problemas encontrados
 
 * PowerShell interpretaba incorrectamente determinados comandos multilínea
@@ -100,7 +113,12 @@ ordenador, además de completar el control multimedia.
   YouTube Music).
 * Decidir si `getWeather` necesita cachear resultados para evitar pedir el
   mismo tiempo repetidamente en una misma conversación.
-
+* Añadir desplazamiento vertical en la sección `Ayuda` para poder consultar
+  todo su contenido independientemente del tamaño de la ventana.
+* Completar progresivamente las secciones `Memoria` y `Herramientas` de la
+  interfaz cuando tengan contenido relevante que mostrar.
+* Continuar mejorando la interfaz sin alterar el diseño visual actual antes
+  de comenzar con la implementación del control por voz.
 ### Estado actual
 
 * [x] Consulta del tiempo
@@ -115,6 +133,10 @@ ordenador, además de completar el control multimedia.
 * [x] Arquitectura `ApplicationSource`
 * [x] Integración real con Windows para música
 * [x] Integración real con Windows para aplicaciones
+* [x] Navegación básica de la interfaz
+* [x] Sección de ayuda
+* [x] Ventana centrada y con tamaño inicial mejorado
+* [x] Ventana redimensionable
 
 ## 09/09/2026
 
