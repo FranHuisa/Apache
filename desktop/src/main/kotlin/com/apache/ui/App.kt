@@ -249,17 +249,53 @@ fun App() {
             }
         }
     }
+    fun processRecordedAudio(audio: ByteArray) {
+
+        scope.launch(Dispatchers.IO) {
+            try {
+
+                val transcription = transcribeAudio(audio)
+
+                val text = transcription.text.trim()
+
+                launch(Dispatchers.Main) {
+                    if (text.isNotBlank()) {
+
+                        processMessage(text)
+                    } else {
+
+                        messages =
+                                messages +
+                                        ChatMessage(
+                                                "No he podido reconocer lo que has dicho.",
+                                                false
+                                        )
+                    }
+                }
+            } catch (e: Exception) {
+
+                launch(Dispatchers.Main) {
+                    messages =
+                            messages +
+                                    ChatMessage(
+                                            "No se ha podido transcribir el audio: ${e.message}",
+                                            false
+                                    )
+                }
+            }
+        }
+    }
     // Inicia o detiene la grabación del micrófono.
     fun toggleRecording() {
 
-        if (!isRecording) {
-
-            isRecording = true
+        if (isRecording) {
 
             scope.launch(Dispatchers.IO) {
                 try {
 
-                    microphoneRecorder.start()
+                    microphoneRecorder.stop()
+
+                    launch(Dispatchers.Main) { isRecording = false }
                 } catch (e: Exception) {
 
                     launch(Dispatchers.Main) {
@@ -268,67 +304,37 @@ fun App() {
                         messages =
                                 messages +
                                         ChatMessage(
-                                                "No se ha podido acceder al micrófono: ${e.message}",
+                                                "No se ha podido detener la grabación: ${e.message}",
                                                 false
                                         )
                     }
                 }
             }
-        } else {
 
-            scope.launch(Dispatchers.IO) {
-                try {
+            return
+        }
 
-                    val audio = microphoneRecorder.stop()
+        isRecording = true
 
-                    launch(Dispatchers.Main) { isRecording = false }
+        scope.launch(Dispatchers.IO) {
+            try {
 
-                    if (audio.isEmpty()) {
+                microphoneRecorder.start { audio ->
+                    scope.launch(Dispatchers.Main) { isRecording = false }
 
-                        launch(Dispatchers.Main) {
-                            messages =
-                                    messages +
-                                            ChatMessage(
-                                                    "No se ha podido obtener ninguna grabación.",
-                                                    false
-                                            )
-                        }
+                    processRecordedAudio(audio)
+                }
+            } catch (e: Exception) {
 
-                        return@launch
-                    }
+                launch(Dispatchers.Main) {
+                    isRecording = false
 
-                    // Guardamos la última grabación realizada.
-                    launch(Dispatchers.Main) { recordedAudio = audio }
-
-                    // Enviamos el audio al Core para obtener la transcripción.
-                    val transcription = transcribeAudio(audio)
-
-                    val text = transcription.text.trim()
-
-                    launch(Dispatchers.Main) {
-                        if (text.isNotBlank()) {
-                            processMessage(text)
-                        } else {
-                            messages =
-                                    messages +
-                                            ChatMessage(
-                                                    "No he podido reconocer lo que has dicho.",
-                                                    false
-                                            )
-                        }
-                    }
-                } catch (e: Exception) {
-
-                    launch(Dispatchers.Main) {
-                        isRecording = false
-
-                        messages =
-                                messages +
-                                        ChatMessage(
-                                                "No se ha podido transcribir el audio: ${e.message}",
-                                                false
-                                        )
-                    }
+                    messages =
+                            messages +
+                                    ChatMessage(
+                                            "No se ha podido acceder al micrófono: ${e.message}",
+                                            false
+                                    )
                 }
             }
         }
