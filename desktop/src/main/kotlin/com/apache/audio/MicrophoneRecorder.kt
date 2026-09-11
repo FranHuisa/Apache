@@ -25,7 +25,7 @@ class MicrophoneRecorder {
         false
     )
 
-    private val silenceTimeoutMs = 3_000L
+    private val silenceTimeoutMs = 2_000L
 
     /**
      * Nivel mínimo de audio necesario para considerar

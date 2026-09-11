@@ -55,4 +55,23 @@ class MemoryRepository {
             .orderBy(Messages.id, SortOrder.ASC)
             .map { GeminiTurn(role = it[Messages.role], text = it[Messages.content]) }
     }
+
+    /** Indica si una conversación con ese id existe realmente (para poder retomarla). */
+    fun conversationExists(conversationId: String): Boolean = transaction {
+        Conversations.select { Conversations.id eq conversationId }.count() > 0
+    }
+
+    /**
+     * Igual que [getHistory], pero filtrando los turnos internos de function-calling
+     * (FUNCTION_CALL de Gemini y los resultados de herramientas con role "function"), que no
+     * tienen sentido mostrarle al usuario en el chat. Se usa para repoblar la conversación en
+     * la UI cuando se reabre la app (ver ChatController.history).
+     */
+    fun getDisplayableHistory(conversationId: String): List<GeminiTurn> = transaction {
+        Messages
+            .select { Messages.conversationId eq conversationId }
+            .orderBy(Messages.id, SortOrder.ASC)
+            .map { GeminiTurn(role = it[Messages.role], text = it[Messages.content]) }
+            .filter { it.role != "function" && !it.text.startsWith("FUNCTION_CALL") }
+    }
 }

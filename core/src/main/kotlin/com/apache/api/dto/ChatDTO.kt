@@ -27,3 +27,20 @@ data class ConfirmRequest(
     val confirmationId: String,
     val approved: Boolean
 )
+
+/** Un turno del historial de una conversación, ya filtrado para mostrarlo en la UI. */
+data class ChatHistoryMessage(
+    val role: String,
+    val content: String
+)
+
+/**
+ * Respuesta del endpoint de historial. `exists = false` indica que ese conversationId no existe
+ * en el Core (ej. porque se borró la base de datos): el cliente debe empezar una conversación
+ * nueva en vez de intentar seguir usando ese id.
+ */
+data class ChatHistoryResponse(
+    val conversationId: String,
+    val exists: Boolean,
+    val messages: List<ChatHistoryMessage>
+)

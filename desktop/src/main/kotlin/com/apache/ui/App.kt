@@ -31,6 +31,7 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.util.Base64
 
 // Representa un mensaje que aparece en el chat.
@@ -47,6 +48,19 @@ data class ChatResponse(
         val confirmationId: String? = null,
         val warning: String? = null
 )
+
+// DTO de un turno del historial de una conversación.
+data class ChatHistoryMessage(val role: String, val content: String)
+
+// DTO que recibimos del endpoint de historial de conversación.
+data class ChatHistoryResponse(
+        val conversationId: String,
+        val exists: Boolean,
+        val messages: List<ChatHistoryMessage>
+)
+
+// DTO de un recuerdo guardado sobre el usuario.
+data class MemoryItem(val id: Int, val content: String)
 
 // DTO que recibimos del endpoint de transcripción.
 data class VoiceTranscriptionResponse(val text: String)
@@ -177,6 +191,80 @@ private fun synthesizeSpeech(text: String): VoiceSpeechResponse {
 
         return objectMapper.readValue(responseBody)
     }
+}
+
+/**
+ * Fichero donde se guarda el id de la última conversación activa, para poder retomarla la
+ * próxima vez que se abra la app en vez de empezar siempre de cero (ver [loadSavedConversationId]
+ * y [saveConversationId]). Vive en la carpeta de usuario, junto al resto de configuración local
+ * de Apache.
+ */
+private val lastConversationFile =
+        File(File(System.getProperty("user.home"), ".apache"), "last_conversation_id.txt")
+
+/** Recupera el id de la última conversación guardada, o null si no hay ninguna (primer arranque). */
+private fun loadSavedConversationId(): String? =
+        try {
+            lastConversationFile.takeIf { it.exists() }?.readText()?.trim()?.ifBlank { null }
+        } catch (_: Exception) {
+            null
+        }
+
+/** Guarda el id de la conversación actual para poder retomarla en el próximo arranque. */
+private fun saveConversationId(conversationId: String) {
+    try {
+        lastConversationFile.parentFile?.mkdirs()
+        lastConversationFile.writeText(conversationId)
+    } catch (_: Exception) {
+        // Si no se puede persistir (permisos, disco lleno...), Apache simplemente empezará una
+        // conversación nueva la próxima vez. No es un fallo crítico.
+    }
+}
+
+/**
+ * Recupera el historial de una conversación existente desde el Core, para poder repoblar el
+ * chat al reabrir la app. Devuelve null si la conversación ya no existe o si el Core no
+ * responde (por ejemplo, si aún no ha terminado de arrancar).
+ */
+private fun fetchConversationHistory(conversationId: String): ChatHistoryResponse? {
+    val request =
+            Request.Builder()
+                    .url("http://localhost:8080/api/chat/history/$conversationId")
+                    .get()
+                    .build()
+
+    return try {
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return null
+
+            val body = response.body?.string() ?: return null
+            objectMapper.readValue<ChatHistoryResponse>(body)
+        }
+    } catch (_: Exception) {
+        null
+    }
+}
+
+/** Recupera todos los recuerdos guardados sobre el usuario, para mostrarlos en la sección Memoria. */
+private fun fetchMemories(): List<MemoryItem> {
+    val request = Request.Builder().url("http://localhost:8080/api/memory").get().build()
+
+    httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+            throw Exception("El Core respondió con HTTP ${response.code}")
+        }
+
+        val body = response.body?.string() ?: return emptyList()
+        return objectMapper.readValue(body)
+    }
+}
+
+/** Borra un recuerdo concreto por id. Devuelve true si se ha borrado correctamente. */
+private fun deleteMemory(id: Int): Boolean {
+    val request =
+            Request.Builder().url("http://localhost:8080/api/memory/$id").delete().build()
+
+    httpClient.newCall(request).execute().use { response -> return response.isSuccessful }
 }
 
 /**

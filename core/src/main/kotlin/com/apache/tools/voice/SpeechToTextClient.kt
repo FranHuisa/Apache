@@ -10,6 +10,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.time.Duration
 import java.util.Base64
 
@@ -39,8 +42,19 @@ class SpeechToTextClient(
         get() =
             "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
 
+    private val sampleRate = 16_000
+    private val bitsPerSample = 16
+    private val channels = 1
+
     /**
      * Transcribe un audio PCM 16-bit, 16 kHz y mono.
+     *
+     * IMPORTANTE: el mime type "audio/L16" (PCM crudo) no está entre los formatos que la API
+     * pública de Gemini (generativelanguage.googleapis.com) documenta como soportados para
+     * audio inline (solo WAV, MP3, AIFF, AAC, OGG y FLAC: https://ai.google.dev/gemini-api/docs/audio).
+     * Mandar PCM crudo con ese mime type provoca que la transcripción falle o venga vacía de
+     * forma intermitente, lo cual rompía silenciosamente la detección de la wake word. Por eso
+     * envolvemos el PCM en un contenedor WAV mínimo antes de mandarlo, y usamos "audio/wav".
      *
      * @param audioData audio PCM sin cabecera WAV
      * @return texto reconocido por Gemini
@@ -52,7 +66,7 @@ class SpeechToTextClient(
         }
 
         val audioBase64 =
-            Base64.getEncoder().encodeToString(audioData)
+            Base64.getEncoder().encodeToString(wrapInWav(audioData))
 
         val body =
             mapOf(
@@ -70,7 +84,7 @@ class SpeechToTextClient(
                                     mapOf(
                                         "inline_data" to
                                             mapOf(
-                                                "mime_type" to "audio/L16;rate=16000",
+                                                "mime_type" to "audio/wav",
                                                 "data" to audioBase64
                                             )
                                     )
@@ -114,5 +128,40 @@ class SpeechToTextClient(
                 ?.trim()
                 ?: ""
         }
+    }
+
+    /**
+     * Añade una cabecera RIFF/WAV de 44 bytes delante del PCM crudo (16-bit, 16 kHz, mono),
+     * sin recodificar ni copiar más datos de los necesarios. Es el formato mínimo que
+     * cualquier lector de WAV (incluido Gemini) reconoce.
+     */
+    private fun wrapInWav(pcm: ByteArray): ByteArray {
+
+        val byteRate = sampleRate * channels * (bitsPerSample / 8)
+        val blockAlign = channels * (bitsPerSample / 8)
+
+        val out = ByteArrayOutputStream(44 + pcm.size)
+        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+
+        header.put("RIFF".toByteArray(Charsets.US_ASCII))
+        header.putInt(36 + pcm.size) // tamaño total del fichero - 8
+        header.put("WAVE".toByteArray(Charsets.US_ASCII))
+
+        header.put("fmt ".toByteArray(Charsets.US_ASCII))
+        header.putInt(16) // tamaño del bloque fmt
+        header.putShort(1) // PCM sin comprimir
+        header.putShort(channels.toShort())
+        header.putInt(sampleRate)
+        header.putInt(byteRate)
+        header.putShort(blockAlign.toShort())
+        header.putShort(bitsPerSample.toShort())
+
+        header.put("data".toByteArray(Charsets.US_ASCII))
+        header.putInt(pcm.size)
+
+        out.write(header.array())
+        out.write(pcm)
+
+        return out.toByteArray()
     }
 }
