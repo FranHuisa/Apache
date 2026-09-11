@@ -28,20 +28,3 @@ object Messages : Table("messages") {
     val createdAt = datetime("created_at")
     override val primaryKey = PrimaryKey(id)
 }
-
-/**
- * Recuerdos a largo plazo sobre el usuario (nombre, gustos, preferencias, datos que ha pedido
- * explícitamente que se recuerden...), independientes de cualquier conversación concreta.
- *
- * A diferencia de [Messages] (historial de una conversación, que se usa para reconstruir el
- * contexto de ESE turno), estas filas sobreviven a conversaciones nuevas y a reinicios de la
- * app: es lo que hace que Apache se sienta como un asistente personal que te conoce, en vez de
- * "olvidarlo todo" cada vez que se abre una conversación nueva. Se inyectan en el system
- * instruction de cada turno (ver Agent.buildSystemInstruction).
- */
-object UserMemories : Table("user_memories") {
-    val id = integer("id").autoIncrement()
-    val content = text("content")
-    val createdAt = datetime("created_at")
-    override val primaryKey = PrimaryKey(id)
-}

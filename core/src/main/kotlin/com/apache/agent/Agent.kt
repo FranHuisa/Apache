@@ -3,7 +3,6 @@ package com.apache.agent
 import com.apache.ai.GeminiClient
 import com.apache.ai.GeminiResult
 import com.apache.memory.MemoryRepository
-import com.apache.memory.UserMemoryRepository
 import com.apache.security.PendingConfirmation
 import com.apache.security.PendingConfirmationStore
 import com.apache.security.PermissionDecision
@@ -27,7 +26,7 @@ sealed class AgentResult {
     ) : AgentResult()
 }
 
-private const val BASE_SYSTEM_INSTRUCTION =
+private const val SYSTEM_INSTRUCTION =
     """
 Eres Apache, un asistente de IA personal instalado en el ordenador del usuario.
 
@@ -37,14 +36,6 @@ disponibles en lugar de inventar la respuesta. Responde siempre en español.
 
 Cuando el usuario solicite varias acciones, realiza todas las acciones necesarias
 y no te limites únicamente a la primera.
-
-Tienes memoria a largo plazo sobre el usuario (ver más abajo, si hay algo guardado).
-Utilízala con naturalidad, como lo haría alguien que conoce a la persona con la que
-habla, sin repetir literalmente lo que sabes de ella salvo que venga a cuento.
-Cuando el usuario te cuente algo sobre sí mismo que tenga sentido recordar en el
-futuro (su nombre, gustos, preferencias, rutinas...), usa la herramienta
-rememberFact para guardarlo. Si te pide olvidar algo que le habías guardado, usa
-forgetFact.
 """
 
 /**
@@ -67,27 +58,8 @@ class Agent(
     private val geminiClient: GeminiClient,
     private val toolRegistry: ToolRegistry,
     private val permissionManager: PermissionManager,
-    private val memoryRepository: MemoryRepository,
-    private val userMemoryRepository: UserMemoryRepository
+    private val memoryRepository: MemoryRepository
 ) {
-
-    /**
-     * Construye el system instruction de este turno: la parte fija de Apache más, si hay algo
-     * guardado, un bloque con los recuerdos a largo plazo sobre el usuario (ver
-     * [UserMemoryRepository]). Se reconstruye en cada turno (no se cachea) porque rememberFact/
-     * forgetFact pueden cambiar la lista en mitad de una conversación.
-     */
-    private fun buildSystemInstruction(): String {
-        val memories = userMemoryRepository.getAll()
-
-        if (memories.isEmpty()) {
-            return BASE_SYSTEM_INSTRUCTION
-        }
-
-        val memoriesBlock = memories.joinToString("\n") { "- ${it.content}" }
-
-        return BASE_SYSTEM_INSTRUCTION + "\n\nDatos que recuerdas sobre el usuario:\n$memoriesBlock\n"
-    }
 
     fun handleMessage(
         conversationId: String?,
@@ -120,7 +92,7 @@ class Agent(
             val geminiResult =
                 geminiClient.sendMessage(
                     history,
-                    buildSystemInstruction()
+                    SYSTEM_INSTRUCTION
                 )
         ) {
 

@@ -54,7 +54,7 @@ class DatabaseFactory(
             // Crea las tablas si no existen. Con SQLite/prototipo esto basta;
             // en un entorno con MySQL real se sustituiría por migraciones (Flyway/Liquibase).
 
-            SchemaUtils.create(Conversations, Messages, UserMemories)
+            SchemaUtils.create(Conversations, Messages)
         }
     }
 }
