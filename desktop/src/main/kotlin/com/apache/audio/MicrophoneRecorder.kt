@@ -25,7 +25,9 @@ class MicrophoneRecorder {
         false
     )
 
-    private val silenceTimeoutMs = 2_000L
+    // Un segundo ofrece una respuesta ágil tras decir la orden sin cortar
+    // las pausas naturales entre palabras.
+    private val silenceTimeoutMs = 1_000L
 
     /**
      * Nivel mínimo de audio necesario para considerar
@@ -95,16 +97,10 @@ class MicrophoneRecorder {
                             bytesRead
                         )
 
-                    println("Apache audio level: $audioLevel")
-
                     val hasVoice =
                         audioLevel >= voiceThreshold
 
                     if (hasVoice) {
-
-                        if (!voiceDetected) {
-                            println("Apache voice detected.")
-                        }
 
                         voiceDetected = true
                         silenceStartedAt = null
@@ -116,7 +112,6 @@ class MicrophoneRecorder {
                             silenceStartedAt =
                                 System.currentTimeMillis()
 
-                            println("Apache silence started.")
                         }
 
                         val silenceDuration =
@@ -124,8 +119,6 @@ class MicrophoneRecorder {
                                     silenceStartedAt
 
                         if (silenceDuration >= silenceTimeoutMs) {
-
-                            println("Apache automatic stop.")
 
                             val recordedAudio =
                                 finishRecording()

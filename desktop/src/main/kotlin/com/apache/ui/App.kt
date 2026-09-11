@@ -6,9 +6,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -59,6 +61,12 @@ data class VoiceSpeechResponse(val audio: String, val sampleRate: Int)
 
 // Palabra de activación que Apache reconoce en el modo escucha.
 private val wakeWordRegex = Regex("(?i)\\bapache\\b")
+
+// Órdenes locales: no se envían al Agent porque controlan la propia escucha.
+private val stopListeningRegex =
+        Regex(
+                "(?i)^\\s*(?:apache[\\s,.:;-]*)?(?:corta|corto|apaga)(?:\\s+(?:el\\s+)?(?:modo\\s+)?escucha)?\\s*[.!]?\\s*$"
+        )
 
 // Cliente HTTP que utilizará Apache Desktop.
 private val httpClient = OkHttpClient()
@@ -462,11 +470,21 @@ fun App() {
         }
     }
 
+    /** Desactiva la escucha mediante una orden local, sin enviarla al Agent. */
+    suspend fun stopListeningByVoice() {
+        withContext(Dispatchers.Main) {
+            listenModeEnabled = false
+            messages = messages + ChatMessage("Modo escucha desactivado.", false)
+        }
+
+        speakReply("Modo escucha desactivado.", audioPlayer)
+    }
+
     /**
      * Escucha en segundo plano hasta detectar la palabra de activación "Apache".
      *
-     * Aprovecha que MicrophoneRecorder ya graba hasta 3 segundos de silencio: cada grabación se
-     * transcribe y se comprueba si contiene "Apache". Si el usuario ha dicho el comando en la
+     * Cada captura termina tras un segundo de silencio, se transcribe y se comprueba si contiene
+     * "Apache". Si el usuario ha dicho el comando en la
      * misma frase ("Apache, abre Discord"), se procesa directamente. Si solo ha dicho "Apache",
      * se vuelve a llamar a esta misma función con [awaitingCommand] = true para grabar el
      * comando a continuación, tratando toda la siguiente grabación como el comando.
@@ -496,7 +514,11 @@ fun App() {
 
                         // Ya se detectó "Apache" antes: esta grabación es directamente el comando.
                         if (transcript.isNotBlank()) {
-                            runVoiceTurn(transcript)
+                            if (stopListeningRegex.matches(transcript)) {
+                                stopListeningByVoice()
+                            } else {
+                                runVoiceTurn(transcript)
+                            }
                         }
 
                         if (listenModeEnabled) {
@@ -520,7 +542,10 @@ fun App() {
                                         .trimStart(',', '.', ':', ';', '-')
                                         .trim()
 
-                        if (command.isNotBlank()) {
+                        if (stopListeningRegex.matches(transcript)) {
+
+                            stopListeningByVoice()
+                        } else if (command.isNotBlank()) {
 
                             runVoiceTurn(command)
 
@@ -616,21 +641,6 @@ fun App() {
                                     },
                             fontSize = 16.sp,
                             modifier = Modifier.clickable { selectedSection = "Memoria" }
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Sección Herramientas.
-                    Text(
-                            text = "Herramientas",
-                            color =
-                                    if (selectedSection == "Herramientas") {
-                                        Color.White
-                                    } else {
-                                        Color(0xFFAAAAAA)
-                                    },
-                            fontSize = 16.sp,
-                            modifier = Modifier.clickable { selectedSection = "Herramientas" }
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -838,77 +848,17 @@ fun App() {
                     }
 
                     // =====================================================
-                    // HERRAMIENTAS
-                    // =====================================================
-
-                    "Herramientas" -> {
-
-                        Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-
-                            // Título de la sección.
-                            Text(text = "Herramientas", color = Color.White, fontSize = 22.sp)
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            // Herramienta de tiempo.
-                            Text(text = "Tiempo", color = Color(0xFF1DB954), fontSize = 17.sp)
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                    text = "Consulta el tiempo actual y la previsión.",
-                                    color = Color(0xFFAAAAAA),
-                                    fontSize = 15.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(18.dp))
-
-                            // Herramienta de música.
-                            Text(text = "Música", color = Color(0xFF1DB954), fontSize = 17.sp)
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                    text = "Controla la reproducción y el volumen.",
-                                    color = Color(0xFFAAAAAA),
-                                    fontSize = 15.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(18.dp))
-
-                            // Herramienta de aplicaciones.
-                            Text(text = "Aplicaciones", color = Color(0xFF1DB954), fontSize = 17.sp)
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                    text = "Abre, cierra y consulta aplicaciones.",
-                                    color = Color(0xFFAAAAAA),
-                                    fontSize = 15.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(18.dp))
-
-                            // Herramienta de sistema.
-                            Text(text = "Sistema", color = Color(0xFF1DB954), fontSize = 17.sp)
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                    text = "Consulta los recursos del ordenador.",
-                                    color = Color(0xFFAAAAAA),
-                                    fontSize = 15.sp
-                            )
-                        }
-                    }
-
-                    // =====================================================
                     // AYUDA
                     // =====================================================
 
                     "Ayuda" -> {
 
-                        Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+                        Column(
+                                modifier =
+                                        Modifier.fillMaxSize()
+                                                .verticalScroll(rememberScrollState())
+                                                .padding(24.dp)
+                        ) {
 
                             // Título de la sección.
                             Text(text = "Ayuda", color = Color.White, fontSize = 22.sp)
@@ -925,16 +875,26 @@ fun App() {
                             Spacer(modifier = Modifier.height(8.dp))
 
                             Text(
-                                    text = "Puedes pedirle acciones utilizando lenguaje natural.",
+                                    text = "Escribe o habla con naturalidad. Apache elige la herramienta adecuada y te pide confirmación antes de acciones sensibles.",
                                     color = Color(0xFFAAAAAA),
                                     fontSize = 15.sp
                             )
 
                             Spacer(modifier = Modifier.height(24.dp))
 
-                            // =================================================
+                            Text(text = "Qué puede hacer", color = Color.White, fontSize = 17.sp)
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                    text = "• Aplicaciones: abrir, cerrar o comprobar si una aplicación está abierta.\n• Música: reproducir, pausar, cambiar de pista, consultar lo que suena y ajustar el volumen.\n• Tiempo: consultar el tiempo actual y la previsión.\n• Sistema: ver recursos e información del ordenador.\n• Fecha y hora: consultar la hora actual.",
+                                    color = Color(0xFFCCCCCC),
+                                    fontSize = 15.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(24.dp))
+
                             // EJEMPLOS DE MÚSICA
-                            // =================================================
 
                             Text(text = "Música", color = Color(0xFF1DB954), fontSize = 17.sp)
 
@@ -956,6 +916,12 @@ fun App() {
 
                             Text(
                                     text = "«¿Qué está sonando?»",
+                                    color = Color(0xFFCCCCCC),
+                                    fontSize = 15.sp
+                            )
+
+                            Text(
+                                    text = "«Pon el volumen al 40 %»",
                                     color = Color(0xFFCCCCCC),
                                     fontSize = 15.sp
                             )
@@ -1028,14 +994,13 @@ fun App() {
 
                             Spacer(modifier = Modifier.height(24.dp))
 
-                            // Próximas funcionalidades.
-                            Text(text = "Próximamente", color = Color.White, fontSize = 17.sp)
+                            Text(text = "Control por voz", color = Color(0xFF1DB954), fontSize = 17.sp)
 
                             Spacer(modifier = Modifier.height(6.dp))
 
                             Text(
-                                    text = "Control por voz",
-                                    color = Color(0xFF777777),
+                                    text = "Pulsa el micrófono para una orden puntual. Activa «Escucha activada» para hablar sin tocar el botón: di «Apache» seguido de la orden, por ejemplo «Apache, abre Discord». El modo sigue activo después de cada respuesta. Para detenerlo, di «Apache, apaga» o «Apache, corto», o pulsa el botón de escucha.",
+                                    color = Color(0xFFCCCCCC),
                                     fontSize = 15.sp
                             )
                         }

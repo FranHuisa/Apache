@@ -2,6 +2,18 @@
 
 ## 11/09/2026 — feature/voice
 
+### Ajustes posteriores de escucha y ayuda
+
+* Reducido de 2 a 1 segundo el silencio necesario para finalizar una captura
+  de voz, para que la orden se procese con menos espera.
+* El modo escucha ya no se desactiva tras recibir una orden: continúa activo
+  después de la respuesta de Apache.
+* Añadidas las órdenes locales de voz `Apache, apaga` y `Apache, corto` para
+  desactivar el modo escucha, además del botón ya existente.
+* Eliminada la sección independiente `Herramientas`; sus capacidades se han
+  incorporado a una guía de Ayuda más completa, con ejemplos, funcionamiento
+  del control por voz y desplazamiento vertical.
+
 ### Objetivo
 
 Completar el control por voz de Apache: modo escucha activable, wake word
