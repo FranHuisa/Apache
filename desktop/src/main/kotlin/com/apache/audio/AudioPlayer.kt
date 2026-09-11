@@ -7,19 +7,23 @@ import javax.sound.sampled.SourceDataLine
 /**
  * Reproduce audio PCM mediante los altavoces del sistema.
  *
- * Utiliza el mismo formato que MicrophoneRecorder.
+ * El audio grabado por el micrófono usa siempre 16 kHz, pero el audio
+ * generado por Text-to-Speech puede venir con otra frecuencia de
+ * muestreo, así que se indica explícitamente en cada reproducción
+ * (por defecto 16 kHz, para no romper otros usos existentes).
  */
 class AudioPlayer {
 
-    private val format = AudioFormat(
-        16_000f,
-        16,
-        1,
-        true,
-        false
-    )
+    fun play(audioData: ByteArray, sampleRate: Int = 16_000) {
 
-    fun play(audioData: ByteArray) {
+        val format = AudioFormat(
+            sampleRate.toFloat(),
+            16,
+            1,
+            true,
+            false
+        )
+
         val dataLine: SourceDataLine = AudioSystem.getSourceDataLine(format)
 
         dataLine.open(format)

@@ -1,5 +1,77 @@
 # Bitácora de desarrollo — Apache
 
+## 11/09/2026 — feature/voice
+
+### Objetivo
+
+Completar el control por voz de Apache: modo escucha activable, wake word
+local "Apache", captura del comando, procesamiento mediante el Agent
+existente y respuesta hablada (TTS).
+
+### Trabajo previo (ya realizado en la rama antes de continuar)
+
+* Captura de audio con `MicrophoneRecorder` (PCM 16 kHz/16-bit/mono).
+* Detección de voz mediante RMS y parada automática tras 3 segundos de
+  silencio, además de parada manual.
+* Transcripción mediante `SpeechToTextClient` mediante Gemini, expuesta en
+  `/api/voice/transcribe`.
+* Botón de micrófono (push-to-talk) integrado en la pantalla de chat, con la
+  transcripción reutilizando el mismo `Agent` que el chat de texto.
+
+### Trabajo realizado ahora
+
+* Añadido el botón "Escucha activada / desactivada" en la pantalla de chat,
+  independiente del botón de micrófono manual.
+* Añadido el bucle de escucha pasiva en `App.kt` (`startListenLoop` /
+  `startCommandCapture`): reutiliza `MicrophoneRecorder` para grabar cada
+  posible frase, la transcribe y comprueba localmente si contiene la palabra
+  "Apache" (wake word) mediante una expresión regular, sin enviar audio
+  continuamente ni depender de un servicio de wake word dedicado.
+* Si el comando se dice en la misma frase ("Apache, abre Discord") se procesa
+  directamente; si solo se dice "Apache", se graba el comando a continuación.
+* Creado `TextToSpeechClient` en el Core (mismo estilo que
+  `SpeechToTextClient`, usando la API de Gemini para generar el audio) y el
+  endpoint `POST /api/voice/speak`.
+* `AudioPlayer` ahora acepta la frecuencia de muestreo del audio a reproducir
+  (el micrófono graba a 16 kHz, pero el TTS de Gemini genera el audio a otra
+  frecuencia configurable).
+* Añadida `runVoiceTurn`, una función que envía el texto al Core, muestra la
+  respuesta y la reproduce por voz antes de continuar, para no reactivar el
+  micrófono mientras Apache está hablando.
+* Si el modo escucha sigue activo tras responder, Apache vuelve a escuchar
+  automáticamente.
+* Añadida configuración de TTS (modelo, voz, frecuencia de muestreo) en
+  `application.yml`, sin tocar la configuración del modelo de texto/STT ya
+  existente.
+
+### Decisiones de diseño
+
+* La wake word se detecta localmente en el código de Desktop (comparando el
+  texto transcrito), sin usar un motor de wake word offline dedicado (tipo
+  Porcupine/Vosk), para no añadir dependencias nuevas ni modelos adicionales.
+* La síntesis de voz solo se activa en las interacciones que vienen de voz
+  (botón de micrófono y modo escucha); los mensajes escritos por teclado
+  siguen respondiéndose únicamente en texto, como hasta ahora.
+
+### Pendiente / Mejoras futuras
+
+* Confirmar acciones de riesgo (`needsConfirmation`) también por voz; de
+  momento se siguen resolviendo por texto/UI.
+* Afinar el umbral de RMS y el manejo de falsos positivos de la wake word en
+  entornos con ruido de fondo.
+* Cachear o evitar transcripciones redundantes cuando el modo escucha lleva
+  mucho tiempo activo sin que nadie hable.
+
+### Estado actual
+
+* [x] Modo escucha activable/desactivable
+* [x] Wake word local "Apache"
+* [x] Captura del comando tras detectar la wake word
+* [x] Parada automática tras silencio (ya existente)
+* [x] Transcripción → Agent → herramientas (ya existente, reutilizado)
+* [x] Text-to-Speech de la respuesta
+* [x] Bucle de escucha continua mientras el modo escucha esté activo
+
 ## 10/09/2026 — feature/get-weather
 
 ### Objetivo

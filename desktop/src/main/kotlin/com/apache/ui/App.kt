@@ -25,11 +25,13 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.Base64
 
 // Representa un mensaje que aparece en el chat.
 data class ChatMessage(val text: String, val isUser: Boolean)
@@ -48,6 +50,15 @@ data class ChatResponse(
 
 // DTO que recibimos del endpoint de transcripción.
 data class VoiceTranscriptionResponse(val text: String)
+
+// DTO que enviamos al endpoint de síntesis de voz.
+data class VoiceSpeakRequest(val text: String)
+
+// DTO que recibimos del endpoint de síntesis de voz.
+data class VoiceSpeechResponse(val audio: String, val sampleRate: Int)
+
+// Palabra de activación que Apache reconoce en el modo escucha.
+private val wakeWordRegex = Regex("(?i)\\bapache\\b")
 
 // Cliente HTTP que utilizará Apache Desktop.
 private val httpClient = OkHttpClient()
@@ -140,6 +151,59 @@ private fun transcribeAudio(audioData: ByteArray): VoiceTranscriptionResponse {
     }
 }
 
+/**
+ * Solicita al Core que convierta un texto en audio (Text-to-Speech).
+ *
+ * Desktop -> HTTP POST -> Core -> TextToSpeechClient -> Gemini
+ */
+private fun synthesizeSpeech(text: String): VoiceSpeechResponse {
+
+    val json = objectMapper.writeValueAsString(VoiceSpeakRequest(text = text))
+
+    val request =
+            Request.Builder()
+                    .url("http://localhost:8080/api/voice/speak")
+                    .post(json.toRequestBody(jsonMediaType))
+                    .build()
+
+    httpClient.newCall(request).execute().use { response ->
+
+        if (!response.isSuccessful) {
+            throw Exception("El Core respondió con HTTP ${response.code}")
+        }
+
+        val responseBody =
+                response.body?.string() ?: throw Exception("El Core no devolvió ningún audio.")
+
+        return objectMapper.readValue(responseBody)
+    }
+}
+
+/**
+ * Convierte un texto en audio y lo reproduce por los altavoces.
+ *
+ * Es una llamada bloqueante (red + reproducción), así que debe ejecutarse siempre desde un hilo
+ * secundario, nunca desde el hilo de la interfaz. Si la síntesis de voz falla, no interrumpe la
+ * conversación: la respuesta ya se ha mostrado en texto.
+ */
+private fun speakReply(text: String, audioPlayer: AudioPlayer) {
+
+    if (text.isBlank()) {
+        return
+    }
+
+    try {
+        val speech = synthesizeSpeech(text)
+
+        if (speech.audio.isNotBlank()) {
+            val audioBytes = Base64.getDecoder().decode(speech.audio)
+            audioPlayer.play(audioBytes, speech.sampleRate)
+        }
+    } catch (_: Exception) {
+        // Fallo silencioso: la respuesta de texto ya se ha mostrado igualmente.
+    }
+}
+
 @Composable
 fun App() {
 
@@ -187,6 +251,9 @@ fun App() {
     // Indica si Apache está grabando desde el micrófono.
     var isRecording by remember { mutableStateOf(false) }
 
+    // Indica si el modo escucha (wake word "Apache") está activado.
+    var listenModeEnabled by remember { mutableStateOf(false) }
+
     // Guarda la última grabación realizada.
     var recordedAudio by remember { mutableStateOf<ByteArray?>(null) }
 
@@ -197,7 +264,7 @@ fun App() {
         }
     }
 
-    fun processMessage(text: String) {
+    fun processMessage(text: String, speak: Boolean = false) {
 
         if (text.isBlank() || isLoading) {
             return
@@ -221,17 +288,22 @@ fun App() {
 
                 val response = sendMessageToCore(conversationId, text)
 
+                val reply =
+                        response.reply
+                                ?: response.warning ?: "Apache no devolvió una respuesta."
+
                 launch(Dispatchers.Main) {
                     conversationId = response.conversationId
-
-                    val reply =
-                            response.reply
-                                    ?: response.warning ?: "Apache no devolvió una respuesta."
 
                     messages = messages + ChatMessage(reply, false)
 
                     isLoading = false
                     showThinking = false
+                }
+
+                // Si el mensaje viene de una interacción por voz, Apache responde también hablando.
+                if (speak) {
+                    speakReply(reply, audioPlayer)
                 }
             } catch (e: Exception) {
 
@@ -261,7 +333,7 @@ fun App() {
                 launch(Dispatchers.Main) {
                     if (text.isNotBlank()) {
 
-                        processMessage(text)
+                        processMessage(text, speak = true)
                     } else {
 
                         messages =
@@ -343,6 +415,159 @@ fun App() {
             }
         }
     }
+    // Activa o desactiva el modo escucha (wake word "Apache").
+    fun toggleListenMode() {
+        listenModeEnabled = !listenModeEnabled
+    }
+
+    /**
+     * Ejecuta un turno completo de voz: manda el texto ya transcrito al Core (mismo Agent que el
+     * chat de texto), muestra la respuesta y la reproduce por los altavoces (TTS).
+     *
+     * Es una función suspend que no termina hasta que la respuesta se ha mostrado y se ha
+     * terminado de reproducir por voz, para poder encadenar turnos del modo escucha sin que
+     * Apache se grabe a sí mismo mientras habla.
+     */
+    suspend fun runVoiceTurn(text: String) {
+
+        withContext(Dispatchers.Main) {
+            messages = messages + ChatMessage(text, true)
+            isLoading = true
+        }
+
+        try {
+            val response = sendMessageToCore(conversationId, text)
+
+            val reply =
+                    response.reply ?: response.warning ?: "Apache no devolvió una respuesta."
+
+            withContext(Dispatchers.Main) {
+                conversationId = response.conversationId
+                messages = messages + ChatMessage(reply, false)
+                isLoading = false
+            }
+
+            speakReply(reply, audioPlayer)
+        } catch (e: Exception) {
+
+            withContext(Dispatchers.Main) {
+                messages =
+                        messages +
+                                ChatMessage(
+                                        "No puedo conectar con Apache Core: ${e.message}",
+                                        false
+                                )
+                isLoading = false
+            }
+        }
+    }
+
+    // Graba directamente el comando después de haber detectado la palabra "Apache" sola,
+    // sin nada más a continuación en la misma grabación.
+    fun startCommandCapture() {
+
+        if (!listenModeEnabled) {
+            return
+        }
+
+        microphoneRecorder.start { audio ->
+            scope.launch(Dispatchers.IO) {
+
+                if (audio.isEmpty()) {
+                    if (listenModeEnabled) startListenLoop()
+                    return@launch
+                }
+
+                try {
+                    val transcription = transcribeAudio(audio)
+                    val command = transcription.text.trim()
+
+                    if (command.isNotBlank()) {
+                        runVoiceTurn(command)
+                    }
+                } catch (_: Exception) {
+                    // Ignoramos errores puntuales de transcripción del comando y seguimos escuchando.
+                }
+
+                if (listenModeEnabled) {
+                    startListenLoop()
+                }
+            }
+        }
+    }
+
+    /**
+     * Escucha en segundo plano hasta detectar la palabra de activación "Apache".
+     *
+     * Aprovecha que MicrophoneRecorder ya graba hasta 3 segundos de silencio: cada grabación se
+     * transcribe y se comprueba si contiene "Apache". Si el usuario ha dicho el comando en la
+     * misma frase ("Apache, abre Discord"), se procesa directamente. Si solo ha dicho "Apache",
+     * se pasa a grabar el comando a continuación (startCommandCapture).
+     */
+    fun startListenLoop() {
+
+        if (!listenModeEnabled) {
+            return
+        }
+
+        microphoneRecorder.start { audio ->
+            scope.launch(Dispatchers.IO) {
+
+                if (audio.isEmpty()) {
+                    if (listenModeEnabled) startListenLoop()
+                    return@launch
+                }
+
+                try {
+                    val transcription = transcribeAudio(audio)
+                    val transcript = transcription.text.trim()
+                    val match = wakeWordRegex.find(transcript)
+
+                    if (match == null) {
+
+                        // No se ha dicho "Apache": descartamos el audio y seguimos escuchando.
+                        if (listenModeEnabled) startListenLoop()
+                        return@launch
+                    }
+
+                    val command =
+                            transcript
+                                    .substring(match.range.last + 1)
+                                    .trim()
+                                    .trimStart(',', '.', ':', ';', '-')
+                                    .trim()
+
+                    if (command.isNotBlank()) {
+
+                        runVoiceTurn(command)
+
+                        if (listenModeEnabled) {
+                            startListenLoop()
+                        }
+                    } else {
+
+                        // Solo se ha dicho "Apache": grabamos el comando por separado.
+                        startCommandCapture()
+                    }
+                } catch (_: Exception) {
+
+                    // Ignoramos errores puntuales de la escucha pasiva (ruido, silencio, etc.)
+                    // y seguimos escuchando en segundo plano.
+                    if (listenModeEnabled) startListenLoop()
+                }
+            }
+        }
+    }
+
+    // Inicia o detiene el bucle de escucha pasiva en cuanto cambia el modo escucha.
+    LaunchedEffect(listenModeEnabled) {
+        if (listenModeEnabled) {
+            startListenLoop()
+        } else {
+            withContext(Dispatchers.IO) { microphoneRecorder.stop() }
+        }
+    }
+
     // Función que envía el mensaje tanto desde el botón como desde Enter.
     fun sendMessage() {
 
@@ -526,11 +751,41 @@ fun App() {
                                 Spacer(modifier = Modifier.width(10.dp))
 
                                 // =================================================
+                                // BOTÓN DE MODO ESCUCHA (wake word)
+                                // =================================================
+
+                                Button(
+                                        enabled = !isLoading && !isRecording,
+                                        onClick = { toggleListenMode() },
+                                        colors =
+                                                ButtonDefaults.buttonColors(
+                                                        containerColor =
+                                                                if (listenModeEnabled) {
+                                                                    Color(0xFF1DB954)
+                                                                } else {
+                                                                    Color(0xFF444444)
+                                                                }
+                                                )
+                                ) {
+                                    Text(
+                                            text =
+                                                    if (listenModeEnabled) {
+                                                        "Escucha activada"
+                                                    } else {
+                                                        "Escucha desactivada"
+                                                    },
+                                            color = Color.Black
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(10.dp))
+
+                                // =================================================
                                 // BOTÓN DE VOZ
                                 // =================================================
 
                                 Button(
-                                        enabled = !isLoading,
+                                        enabled = !isLoading && !listenModeEnabled,
                                         onClick = { toggleRecording() },
                                         colors =
                                                 ButtonDefaults.buttonColors(

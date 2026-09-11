@@ -43,9 +43,11 @@
 
 ## Fase 5 — Voz
 
-* [ ] Speech-to-text
-* [ ] Text-to-speech
-* [ ] Activación por voz
+* [x] Speech-to-text
+* [x] Text-to-speech
+* [x] Activación por voz (modo escucha + wake word local "Apache")
+* [ ] Confirmaciones de acciones de riesgo por voz
+* [ ] Reducir falsos positivos de la wake word con ruido de fondo
 
 ## Fase 6 — Smart Home
 
