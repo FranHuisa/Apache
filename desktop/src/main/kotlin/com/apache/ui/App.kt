@@ -462,49 +462,19 @@ fun App() {
         }
     }
 
-    // Graba directamente el comando después de haber detectado la palabra "Apache" sola,
-    // sin nada más a continuación en la misma grabación.
-    fun startCommandCapture() {
-
-        if (!listenModeEnabled) {
-            return
-        }
-
-        microphoneRecorder.start { audio ->
-            scope.launch(Dispatchers.IO) {
-
-                if (audio.isEmpty()) {
-                    if (listenModeEnabled) startListenLoop()
-                    return@launch
-                }
-
-                try {
-                    val transcription = transcribeAudio(audio)
-                    val command = transcription.text.trim()
-
-                    if (command.isNotBlank()) {
-                        runVoiceTurn(command)
-                    }
-                } catch (_: Exception) {
-                    // Ignoramos errores puntuales de transcripción del comando y seguimos escuchando.
-                }
-
-                if (listenModeEnabled) {
-                    startListenLoop()
-                }
-            }
-        }
-    }
-
     /**
      * Escucha en segundo plano hasta detectar la palabra de activación "Apache".
      *
      * Aprovecha que MicrophoneRecorder ya graba hasta 3 segundos de silencio: cada grabación se
      * transcribe y se comprueba si contiene "Apache". Si el usuario ha dicho el comando en la
      * misma frase ("Apache, abre Discord"), se procesa directamente. Si solo ha dicho "Apache",
-     * se pasa a grabar el comando a continuación (startCommandCapture).
+     * se vuelve a llamar a esta misma función con [awaitingCommand] = true para grabar el
+     * comando a continuación, tratando toda la siguiente grabación como el comando.
+     *
+     * Es una única función auto-recursiva (en vez de dos funciones que se llaman entre sí) para
+     * evitar referencias hacia adelante entre funciones locales, que Kotlin no permite.
      */
-    fun startListenLoop() {
+    fun startPassiveListening(awaitingCommand: Boolean = false) {
 
         if (!listenModeEnabled) {
             return
@@ -514,46 +484,60 @@ fun App() {
             scope.launch(Dispatchers.IO) {
 
                 if (audio.isEmpty()) {
-                    if (listenModeEnabled) startListenLoop()
+                    if (listenModeEnabled) startPassiveListening(awaitingCommand)
                     return@launch
                 }
 
                 try {
                     val transcription = transcribeAudio(audio)
                     val transcript = transcription.text.trim()
-                    val match = wakeWordRegex.find(transcript)
 
-                    if (match == null) {
+                    if (awaitingCommand) {
 
-                        // No se ha dicho "Apache": descartamos el audio y seguimos escuchando.
-                        if (listenModeEnabled) startListenLoop()
-                        return@launch
-                    }
-
-                    val command =
-                            transcript
-                                    .substring(match.range.last + 1)
-                                    .trim()
-                                    .trimStart(',', '.', ':', ';', '-')
-                                    .trim()
-
-                    if (command.isNotBlank()) {
-
-                        runVoiceTurn(command)
+                        // Ya se detectó "Apache" antes: esta grabación es directamente el comando.
+                        if (transcript.isNotBlank()) {
+                            runVoiceTurn(transcript)
+                        }
 
                         if (listenModeEnabled) {
-                            startListenLoop()
+                            startPassiveListening()
                         }
                     } else {
 
-                        // Solo se ha dicho "Apache": grabamos el comando por separado.
-                        startCommandCapture()
+                        val match = wakeWordRegex.find(transcript)
+
+                        if (match == null) {
+
+                            // No se ha dicho "Apache": descartamos el audio y seguimos escuchando.
+                            if (listenModeEnabled) startPassiveListening()
+                            return@launch
+                        }
+
+                        val command =
+                                transcript
+                                        .substring(match.range.last + 1)
+                                        .trim()
+                                        .trimStart(',', '.', ':', ';', '-')
+                                        .trim()
+
+                        if (command.isNotBlank()) {
+
+                            runVoiceTurn(command)
+
+                            if (listenModeEnabled) {
+                                startPassiveListening()
+                            }
+                        } else {
+
+                            // Solo se ha dicho "Apache": grabamos el comando por separado.
+                            startPassiveListening(awaitingCommand = true)
+                        }
                     }
                 } catch (_: Exception) {
 
                     // Ignoramos errores puntuales de la escucha pasiva (ruido, silencio, etc.)
                     // y seguimos escuchando en segundo plano.
-                    if (listenModeEnabled) startListenLoop()
+                    if (listenModeEnabled) startPassiveListening(awaitingCommand)
                 }
             }
         }
@@ -562,7 +546,7 @@ fun App() {
     // Inicia o detiene el bucle de escucha pasiva en cuanto cambia el modo escucha.
     LaunchedEffect(listenModeEnabled) {
         if (listenModeEnabled) {
-            startListenLoop()
+            startPassiveListening()
         } else {
             withContext(Dispatchers.IO) { microphoneRecorder.stop() }
         }
