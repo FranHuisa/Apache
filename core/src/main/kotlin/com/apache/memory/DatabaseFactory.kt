@@ -39,6 +39,13 @@ class DatabaseFactory(
     @PostConstruct
     fun connect() {
 
+        println("========================================")
+        println("Apache - Configuración de base de datos")
+        println("URL: $url")
+        println("Driver: $driver")
+        println("Usuario: $username")
+        println("========================================")
+
         Database.connect(
             url = url,
             driver = driver,
