@@ -706,6 +706,23 @@ fun App() {
 
                             Spacer(modifier = Modifier.height(16.dp))
 
+                            if (listenModeEnabled) {
+                                Surface(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        color = Color(0xFF173D29),
+                                        shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text(
+                                            text = "Escucha continua activa · Di «Apache, apaga» para detenerla",
+                                            modifier = Modifier.padding(12.dp),
+                                            color = Color(0xFFA7E8BE),
+                                            fontSize = 14.sp
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
+
                             // =====================================================
                             // ENTRADA DE MENSAJE
                             // =====================================================
@@ -749,26 +766,28 @@ fun App() {
                                 // =================================================
 
                                 Button(
-                                        enabled = !isLoading && !isRecording,
+                                        // Debe seguir disponible mientras Apache responde para
+                                        // poder cortar la escucha en cualquier momento.
+                                        enabled = !isRecording && (listenModeEnabled || !isLoading),
                                         onClick = { toggleListenMode() },
                                         colors =
                                                 ButtonDefaults.buttonColors(
                                                         containerColor =
                                                                 if (listenModeEnabled) {
-                                                                    Color(0xFF1DB954)
+                                                                    Color(0xFF9D3030)
                                                                 } else {
-                                                                    Color(0xFF444444)
-                                                                }
+                                                                    Color(0xFF1DB954)
+                                                                },
+                                                        contentColor = Color.Black
                                                 )
                                 ) {
                                     Text(
                                             text =
                                                     if (listenModeEnabled) {
-                                                        "Escucha activada"
+                                                        "Detener escucha"
                                                     } else {
-                                                        "Escucha desactivada"
-                                                    },
-                                            color = Color.Black
+                                                        "Activar escucha"
+                                                    }
                                     )
                                 }
 
