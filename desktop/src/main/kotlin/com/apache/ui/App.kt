@@ -39,11 +39,11 @@ import java.util.Base64
 data class ChatMessage(val text: String, val isUser: Boolean)
 
 // DTO que enviamos al Core.
-data class ChatRequest(val conversationId: String? = null, val message: String)
+data class ChatRequest(val conversationId: Long? = null, val message: String)
 
 // DTO que recibimos del Core.
 data class ChatResponse(
-        val conversationId: String,
+        val conversationId: Long? = null,
         val reply: String? = null,
         val needsConfirmation: Boolean = false,
         val confirmationId: String? = null,
@@ -85,7 +85,7 @@ private val jsonMediaType = "application/json".toMediaType()
  * Esta función se ejecuta fuera del hilo de la interfaz para que la ventana no se quede congelada
  * mientras esperamos.
  */
-private fun sendMessageToCore(conversationId: String?, message: String): ChatResponse {
+private fun sendMessageToCore(conversationId: Long?, message: String): ChatResponse {
 
     // Convertimos nuestro ChatRequest a JSON.
     val json =
@@ -225,7 +225,7 @@ fun App() {
      *
      * Así Apache puede mantener el contexto de la conversación.
      */
-    var conversationId by remember { mutableStateOf<String?>(null) }
+    var conversationId by remember { mutableStateOf<Long?>(null) }
 
     // Lista de mensajes que aparecen en pantalla.
     var messages by remember {

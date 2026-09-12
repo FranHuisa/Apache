@@ -1,6 +1,8 @@
 package com.apache.memory
 
 import com.apache.ai.GeminiTurn
+import com.apache.database.tables.Conversations
+import com.apache.database.tables.Messages
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.select

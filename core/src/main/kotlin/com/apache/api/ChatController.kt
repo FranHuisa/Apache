@@ -20,26 +20,27 @@ import org.springframework.web.bind.annotation.*
 @RequestMapping("/api/chat")
 class ChatController(private val agent: Agent) {
 
-fun chat(@RequestBody request: ChatRequest): ChatResponse {
+    @PostMapping
+    fun chat(@RequestBody request: ChatRequest): ChatResponse {
 
-    val (conversationId, result) =
-        agent.handleMessage(
-            request.conversationId,
-            request.message
-        )
+        val (conversationId, result) =
+            agent.handleMessage(
+                request.conversationId,
+                request.message
+            )
 
-    return toResponse(conversationId, result)
-}
+        return toResponse(conversationId, result)
+    }
 
     @PostMapping("/confirm")
     fun confirm(@RequestBody request: ConfirmRequest): ChatResponse {
         val result = agent.confirmPendingAction(request.confirmationId, request.approved)
         // conversationId no viaja en la respuesta de confirm porque el cliente
-        // ya lo conoce de la llamada anterior; lo recuperamos solo para el DTO.
-        return toResponse(conversationId = "", result = result)
+        // ya lo conoce de la llamada anterior.
+        return toResponse(conversationId = null, result = result)
     }
 
-    private fun toResponse(conversationId: String, result: AgentResult): ChatResponse = when (result) {
+    private fun toResponse(conversationId: Long?, result: AgentResult): ChatResponse = when (result) {
         is AgentResult.Reply -> ChatResponse(conversationId = conversationId, reply = result.text)
         is AgentResult.NeedsConfirmation -> ChatResponse(
             conversationId = conversationId,

@@ -1,0 +1,227 @@
+diff --git a/core/src/main/kotlin/com/apache/api/ChatController.kt b/core/src/main/kotlin/com/apache/api/ChatController.kt
+index 922ca5b..8492ee6 100644
+--- a/core/src/main/kotlin/com/apache/api/ChatController.kt
++++ b/core/src/main/kotlin/com/apache/api/ChatController.kt
+@@ -20,26 +20,27 @@ import org.springframework.web.bind.annotation.*
+ @RequestMapping("/api/chat")
+ class ChatController(private val agent: Agent) {
+ 
+-fun chat(@RequestBody request: ChatRequest): ChatResponse {
++    @PostMapping
++    fun chat(@RequestBody request: ChatRequest): ChatResponse {
+ 
+-    val (conversationId, result) =
+-        agent.handleMessage(
+-            request.conversationId,
+-            request.message
+-        )
++        val (conversationId, result) =
++            agent.handleMessage(
++                request.conversationId,
++                request.message
++            )
+ 
+-    return toResponse(conversationId, result)
+-}
++        return toResponse(conversationId, result)
++    }
+ 
+     @PostMapping("/confirm")
+     fun confirm(@RequestBody request: ConfirmRequest): ChatResponse {
+         val result = agent.confirmPendingAction(request.confirmationId, request.approved)
+         // conversationId no viaja en la respuesta de confirm porque el cliente
+-        // ya lo conoce de la llamada anterior; lo recuperamos solo para el DTO.
+-        return toResponse(conversationId = "", result = result)
++        // ya lo conoce de la llamada anterior.
++        return toResponse(conversationId = null, result = result)
+     }
+ 
+-    private fun toResponse(conversationId: String, result: AgentResult): ChatResponse = when (result) {
++    private fun toResponse(conversationId: Long?, result: AgentResult): ChatResponse = when (result) {
+         is AgentResult.Reply -> ChatResponse(conversationId = conversationId, reply = result.text)
+         is AgentResult.NeedsConfirmation -> ChatResponse(
+             conversationId = conversationId,
+diff --git a/core/src/main/kotlin/com/apache/api/dto/ChatResponse.kt b/core/src/main/kotlin/com/apache/api/dto/ChatResponse.kt
+index 1773bfc..0ba8bb4 100644
+--- a/core/src/main/kotlin/com/apache/api/dto/ChatResponse.kt
++++ b/core/src/main/kotlin/com/apache/api/dto/ChatResponse.kt
+@@ -5,9 +5,13 @@ package com.apache.api.dto
+  *
+  * conversationId permite al cliente mantener la conversación actual
+  * y enviarlo de nuevo en los siguientes mensajes.
++ *
++ * Es nullable porque /api/chat/confirm no genera ni conoce una
++ * conversación nueva: el cliente ya la tiene guardada de la llamada
++ * anterior a /api/chat.
+  */
+ data class ChatResponse(
+-    val conversationId: Long,
++    val conversationId: Long? = null,
+     val reply: String? = null,
+     val needsConfirmation: Boolean = false,
+     val confirmationId: String? = null,
+diff --git a/core/src/main/kotlin/com/apache/datebase/repository/MemoryRepository.kt b/core/src/main/kotlin/com/apache/datebase/repository/MemoryRepository.kt
+index 2652810..3949278 100644
+--- a/core/src/main/kotlin/com/apache/datebase/repository/MemoryRepository.kt
++++ b/core/src/main/kotlin/com/apache/datebase/repository/MemoryRepository.kt
+@@ -1,6 +1,8 @@
+ package com.apache.memory
+ 
+ import com.apache.ai.GeminiTurn
++import com.apache.database.tables.Conversations
++import com.apache.database.tables.Messages
+ import org.jetbrains.exposed.sql.SortOrder
+ import org.jetbrains.exposed.sql.insert
+ import org.jetbrains.exposed.sql.select
+diff --git a/desktop/src/main/kotlin/com/apache/ui/App.kt b/desktop/src/main/kotlin/com/apache/ui/App.kt
+index b29768f..710d281 100644
+--- a/desktop/src/main/kotlin/com/apache/ui/App.kt
++++ b/desktop/src/main/kotlin/com/apache/ui/App.kt
+@@ -39,11 +39,11 @@ import java.util.Base64
+ data class ChatMessage(val text: String, val isUser: Boolean)
+ 
+ // DTO que enviamos al Core.
+-data class ChatRequest(val conversationId: String? = null, val message: String)
++data class ChatRequest(val conversationId: Long? = null, val message: String)
+ 
+ // DTO que recibimos del Core.
+ data class ChatResponse(
+-        val conversationId: String,
++        val conversationId: Long? = null,
+         val reply: String? = null,
+         val needsConfirmation: Boolean = false,
+         val confirmationId: String? = null,
+@@ -85,7 +85,7 @@ private val jsonMediaType = "application/json".toMediaType()
+  * Esta función se ejecuta fuera del hilo de la interfaz para que la ventana no se quede congelada
+  * mientras esperamos.
+  */
+-private fun sendMessageToCore(conversationId: String?, message: String): ChatResponse {
++private fun sendMessageToCore(conversationId: Long?, message: String): ChatResponse {
+ 
+     // Convertimos nuestro ChatRequest a JSON.
+     val json =
+@@ -225,7 +225,7 @@ fun App() {
+      *
+      * Así Apache puede mantener el contexto de la conversación.
+      */
+-    var conversationId by remember { mutableStateOf<String?>(null) }
++    var conversationId by remember { mutableStateOf<Long?>(null) }
+ 
+     // Lista de mensajes que aparecen en pantalla.
+     var messages by remember {
+diff --git a/core/src/main/kotlin/com/apache/api/dto/ConfirmRequest.kt b/core/src/main/kotlin/com/apache/api/dto/ConfirmRequest.kt
+new file mode 100644
+index 0000000..aa21450
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/api/dto/ConfirmRequest.kt
+@@ -0,0 +1,13 @@
++package com.apache.api.dto
++
++/**
++ * Petición para confirmar (o rechazar) una acción pendiente.
++ *
++ * confirmationId es el identificador en memoria generado por
++ * PendingConfirmationStore (UUID como String), no el id de la
++ * conversación, por lo que no participa en la migración a Long.
++ */
++data class ConfirmRequest(
++    val confirmationId: String,
++    val approved: Boolean
++)
+diff --git a/core/src/main/kotlin/com/apache/api/dto/ChatDTO.kt b/core/src/main/kotlin/com/apache/api/dto/ChatDTO.kt
+deleted file mode 100644
+index a842415..0000000
+--- a/core/src/main/kotlin/com/apache/api/dto/ChatDTO.kt
++++ /dev/null
+@@ -1,29 +0,0 @@
+-package com.apache.api.dto
+-
+-/** Petición entrante desde la app de escritorio para enviar un mensaje. */
+-data class ChatRequest(
+-    val conversationId: String? = null,
+-    val message: String
+-)
+-
+-/**
+- * Respuesta que recibe la app de escritorio. Solo uno de los dos casos
+- * relevantes está "activo" a la vez:
+- *  - reply != null                -> mostrar el texto normalmente
+- *  - needsConfirmation == true    -> mostrar un diálogo de confirmación
+- *    con `warning`, y guardar `confirmationId` para la siguiente llamada
+- *    a /api/chat/confirm.
+- */
+-data class ChatResponse(
+-    val conversationId: String,
+-    val reply: String? = null,
+-    val needsConfirmation: Boolean = false,
+-    val confirmationId: String? = null,
+-    val warning: String? = null
+-)
+-
+-/** Petición para confirmar (o rechazar) una acción pendiente. */
+-data class ConfirmRequest(
+-    val confirmationId: String,
+-    val approved: Boolean
+-)
+\ No newline at end of file
+diff --git a/core/src/main/kotlin/com/apache/memory/Tables.kt b/core/src/main/kotlin/com/apache/memory/Tables.kt
+deleted file mode 100644
+index dd3500b..0000000
+--- a/core/src/main/kotlin/com/apache/memory/Tables.kt
++++ /dev/null
+@@ -1,54 +0,0 @@
+-package com.apache.memory
+-
+-import org.jetbrains.exposed.sql.Table
+-import org.jetbrains.exposed.sql.javatime.datetime
+-
+-/**
+- * Una conversación pertenece a un usuario y contiene los mensajes
+- * intercambiados con Apache.
+- *
+- * El identificador es generado automáticamente por MySQL.
+- */
+-object Conversations : Table("conversation") {
+-
+-    val id = long("id").autoIncrement()
+-
+-    val userId = long("user_id")
+-
+-    val title = varchar("title", 200).nullable()
+-
+-    val createdAt = datetime("created_at")
+-
+-    val updatedAt = datetime("updated_at")
+-
+-    override val primaryKey = PrimaryKey(id)
+-}
+-
+-/**
+- * Cada mensaje pertenece a una conversación.
+- *m
+- * Guardamos el historial completo para poder reconstruir
+- * el contexto que se manda a Gemini en cada turno.
+- *
+- * Los roles utilizados por Apache son:
+- * - user
+- * - model
+- * - function
+- * - system
+- */
+-object Messages : Table("message") {
+-
+-    val id = long("id").autoIncrement()
+-
+-    val conversationId = long("conversation_id")
+-
+-    val role = varchar("role", 20)
+-
+-    val content = text("content")
+-
+-    val createdAt = datetime("created_at")
+-
+-    val updatedAt = datetime("updated_at")
+-
+-    override val primaryKey = PrimaryKey(id)
+-}
+\ No newline at end of file
