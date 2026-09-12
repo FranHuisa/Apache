@@ -10,8 +10,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +24,7 @@ import com.apache.audio.AudioPlayer
 import com.apache.audio.MicrophoneRecorder
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import java.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -33,7 +34,6 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.util.Base64
 
 // Representa un mensaje que aparece en el chat.
 data class ChatMessage(val text: String, val isUser: Boolean)
@@ -77,6 +77,53 @@ private val objectMapper = jacksonObjectMapper()
 // Tipo de contenido que enviamos al Core.
 private val jsonMediaType = "application/json".toMediaType()
 
+/**
+ * Persiste el `conversationId` de la última conversación en disco.
+ *
+ * Sin esto, cada vez que se cierra y se vuelve a abrir el Desktop se pierde el `conversationId`
+ * (solo vivía en memoria de Compose), y Apache empezaba una conversación nueva aunque en MySQL ya
+ * existiera el historial completo.
+ *
+ * Se guarda en un archivo de texto plano dentro de la carpeta de configuración del usuario:
+ * ~/.apache/session.properties
+ */
+private object SessionStore {
+
+    private val sessionDir = java.io.File(System.getProperty("user.home"), ".apache")
+    private val sessionFile = java.io.File(sessionDir, "session.properties")
+
+    /** Lee el conversationId guardado, o null si no hay ninguno (primer arranque). */
+    fun loadConversationId(): Long? {
+        return try {
+            if (!sessionFile.exists()) return null
+
+            val properties = java.util.Properties()
+            sessionFile.inputStream().use { properties.load(it) }
+
+            properties.getProperty("conversationId")?.toLongOrNull()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Guarda el conversationId actual para poder recuperarlo en el próximo arranque. */
+    fun saveConversationId(conversationId: Long?) {
+        if (conversationId == null) return
+
+        try {
+            if (!sessionDir.exists()) {
+                sessionDir.mkdirs()
+            }
+
+            val properties = java.util.Properties()
+            properties.setProperty("conversationId", conversationId.toString())
+
+            sessionFile.outputStream().use {
+                properties.store(it, "Apache - sesión de conversación actual")
+            }
+        } catch (e: Exception) {}
+    }
+}
 /**
  * Envía un mensaje al Apache Core.
  *
@@ -175,7 +222,6 @@ private fun synthesizeSpeech(text: String): VoiceSpeechResponse {
                     .build()
 
     httpClient.newCall(request).execute().use { response ->
-
         if (!response.isSuccessful) {
             throw Exception("El Core respondió con HTTP ${response.code}")
         }
@@ -221,12 +267,11 @@ fun App() {
     /**
      * ID de la conversación actual.
      *
-     * Al principio es null. El Core nos devolverá uno después del primer mensaje.
-     *
-     * Así Apache puede mantener el contexto de la conversación.
+     * Al principio es null. El Core nos devolverá uno después del primer mensaje. var
+     * conversationId by remember { mutableStateOf(SessionStore.loadConversationId()) } * Así Apache
+     * puede mantener el contexto de la conversación.
      */
-    var conversationId by remember { mutableStateOf<Long?>(null) }
-
+    var conversationId by remember { mutableStateOf(SessionStore.loadConversationId()) }
     // Lista de mensajes que aparecen en pantalla.
     var messages by remember {
         mutableStateOf(
@@ -297,12 +342,11 @@ fun App() {
                 val response = sendMessageToCore(conversationId, text)
 
                 val reply =
-                        response.reply
-                                ?: response.warning ?: "Apache no devolvió una respuesta."
+                        response.reply ?: response.warning ?: "Apache no devolvió una respuesta."
 
                 launch(Dispatchers.Main) {
                     conversationId = response.conversationId
-
+                    SessionStore.saveConversationId(response.conversationId)
                     messages = messages + ChatMessage(reply, false)
 
                     isLoading = false
@@ -432,9 +476,9 @@ fun App() {
      * Ejecuta un turno completo de voz: manda el texto ya transcrito al Core (mismo Agent que el
      * chat de texto), muestra la respuesta y la reproduce por los altavoces (TTS).
      *
-     * Es una función suspend que no termina hasta que la respuesta se ha mostrado y se ha
-     * terminado de reproducir por voz, para poder encadenar turnos del modo escucha sin que
-     * Apache se grabe a sí mismo mientras habla.
+     * Es una función suspend que no termina hasta que la respuesta se ha mostrado y se ha terminado
+     * de reproducir por voz, para poder encadenar turnos del modo escucha sin que Apache se grabe a
+     * sí mismo mientras habla.
      */
     suspend fun runVoiceTurn(text: String) {
 
@@ -446,11 +490,11 @@ fun App() {
         try {
             val response = sendMessageToCore(conversationId, text)
 
-            val reply =
-                    response.reply ?: response.warning ?: "Apache no devolvió una respuesta."
+            val reply = response.reply ?: response.warning ?: "Apache no devolvió una respuesta."
 
             withContext(Dispatchers.Main) {
                 conversationId = response.conversationId
+                SessionStore.saveConversationId(response.conversationId)
                 messages = messages + ChatMessage(reply, false)
                 isLoading = false
             }
@@ -484,10 +528,10 @@ fun App() {
      * Escucha en segundo plano hasta detectar la palabra de activación "Apache".
      *
      * Cada captura termina tras un segundo de silencio, se transcribe y se comprueba si contiene
-     * "Apache". Si el usuario ha dicho el comando en la
-     * misma frase ("Apache, abre Discord"), se procesa directamente. Si solo ha dicho "Apache",
-     * se vuelve a llamar a esta misma función con [awaitingCommand] = true para grabar el
-     * comando a continuación, tratando toda la siguiente grabación como el comando.
+     * "Apache". Si el usuario ha dicho el comando en la misma frase ("Apache, abre Discord"), se
+     * procesa directamente. Si solo ha dicho "Apache", se vuelve a llamar a esta misma función con
+     * [awaitingCommand] = true para grabar el comando a continuación, tratando toda la siguiente
+     * grabación como el comando.
      *
      * Es una única función auto-recursiva (en vez de dos funciones que se llaman entre sí) para
      * evitar referencias hacia adelante entre funciones locales, que Kotlin no permite.
@@ -500,7 +544,6 @@ fun App() {
 
         microphoneRecorder.start { audio ->
             scope.launch(Dispatchers.IO) {
-
                 if (audio.isEmpty()) {
                     if (listenModeEnabled) startPassiveListening(awaitingCommand)
                     return@launch
@@ -713,7 +756,8 @@ fun App() {
                                         shape = RoundedCornerShape(10.dp)
                                 ) {
                                     Text(
-                                            text = "Escucha continua activa · Di «Apache, apaga» para detenerla",
+                                            text =
+                                                    "Escucha continua activa · Di «Apache, apaga» para detenerla",
                                             modifier = Modifier.padding(12.dp),
                                             color = Color(0xFFA7E8BE),
                                             fontSize = 14.sp
@@ -894,7 +938,8 @@ fun App() {
                             Spacer(modifier = Modifier.height(8.dp))
 
                             Text(
-                                    text = "Escribe o habla con naturalidad. Apache elige la herramienta adecuada y te pide confirmación antes de acciones sensibles.",
+                                    text =
+                                            "Escribe o habla con naturalidad. Apache elige la herramienta adecuada y te pide confirmación antes de acciones sensibles.",
                                     color = Color(0xFFAAAAAA),
                                     fontSize = 15.sp
                             )
@@ -906,7 +951,8 @@ fun App() {
                             Spacer(modifier = Modifier.height(8.dp))
 
                             Text(
-                                    text = "• Aplicaciones: abrir, cerrar o comprobar si una aplicación está abierta.\n• Música: reproducir, pausar, cambiar de pista, consultar lo que suena y ajustar el volumen.\n• Tiempo: consultar el tiempo actual y la previsión.\n• Sistema: ver recursos e información del ordenador.\n• Fecha y hora: consultar la hora actual.",
+                                    text =
+                                            "• Aplicaciones: abrir, cerrar o comprobar si una aplicación está abierta.\n• Música: reproducir, pausar, cambiar de pista, consultar lo que suena y ajustar el volumen.\n• Tiempo: consultar el tiempo actual y la previsión.\n• Sistema: ver recursos e información del ordenador.\n• Fecha y hora: consultar la hora actual.",
                                     color = Color(0xFFCCCCCC),
                                     fontSize = 15.sp
                             )
@@ -1013,12 +1059,17 @@ fun App() {
 
                             Spacer(modifier = Modifier.height(24.dp))
 
-                            Text(text = "Control por voz", color = Color(0xFF1DB954), fontSize = 17.sp)
+                            Text(
+                                    text = "Control por voz",
+                                    color = Color(0xFF1DB954),
+                                    fontSize = 17.sp
+                            )
 
                             Spacer(modifier = Modifier.height(6.dp))
 
                             Text(
-                                    text = "Pulsa el micrófono para una orden puntual. Activa «Escucha activada» para hablar sin tocar el botón: di «Apache» seguido de la orden, por ejemplo «Apache, abre Discord». El modo sigue activo después de cada respuesta. Para detenerlo, di «Apache, apaga» o «Apache, corto», o pulsa el botón de escucha.",
+                                    text =
+                                            "Pulsa el micrófono para una orden puntual. Activa «Escucha activada» para hablar sin tocar el botón: di «Apache» seguido de la orden, por ejemplo «Apache, abre Discord». El modo sigue activo después de cada respuesta. Para detenerlo, di «Apache, apaga» o «Apache, corto», o pulsa el botón de escucha.",
                                     color = Color(0xFFCCCCCC),
                                     fontSize = 15.sp
                             )

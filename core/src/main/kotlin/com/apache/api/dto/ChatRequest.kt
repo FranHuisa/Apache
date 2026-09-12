@@ -9,4 +9,4 @@ package com.apache.api.dto
 data class ChatRequest(
     val conversationId: Long? = null,
     val message: String
-)git apply apache-database-fix.patch
+)
