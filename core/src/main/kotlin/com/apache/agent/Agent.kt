@@ -2,7 +2,7 @@ package com.apache.agent
 
 import com.apache.ai.GeminiClient
 import com.apache.ai.GeminiResult
-import com.apache.memory.MemoryRepository
+import com.apache.memory.MemoryService
 import com.apache.security.PendingConfirmation
 import com.apache.security.PendingConfirmationStore
 import com.apache.security.PermissionDecision
@@ -55,20 +55,39 @@ y no te limites únicamente a la primera.
  */
 @Component
 class Agent(
+
     private val geminiClient: GeminiClient,
+
     private val toolRegistry: ToolRegistry,
+
     private val permissionManager: PermissionManager,
-    private val memoryRepository: MemoryRepository
+
+    private val memoryService: MemoryService
+
 ) {
 
+    /**
+     * Apache 0.1 utiliza inicialmente el usuario `default`.
+     *
+     * Este usuario se creó durante la configuración inicial de MySQL
+     * y actualmente corresponde al id 1.
+     *
+     * Más adelante este valor dejará de estar fijado cuando Apache
+     * tenga gestión de usuarios y sesiones.
+     */
+    private val defaultUserId = 1L
+
     fun handleMessage(
-        conversationId: String?,
+        conversationId: Long?,
         userMessage: String
-    ): Pair<String, AgentResult> {
+    ): Pair<Long, AgentResult> {
 
-        val convId = memoryRepository.getOrCreateConversation(conversationId)
+        val convId = memoryService.getOrCreateConversation(
+            userId = defaultUserId,
+            conversationId = conversationId
+        )
 
-        memoryRepository.appendMessage(
+        memoryService.appendMessage(
             convId,
             "user",
             userMessage
@@ -84,9 +103,9 @@ class Agent(
      * memoria. Es una función separada de handleMessage porque se vuelve a invocar
      * recursivamente tras ejecutar una tool y también tras confirmar una acción pendiente.
      */
-    private fun runTurn(conversationId: String): AgentResult {
+    private fun runTurn(conversationId: Long): AgentResult {
 
-        val history = memoryRepository.getHistory(conversationId)
+        val history = memoryService.getHistory(conversationId)
 
         return when (
             val geminiResult =
@@ -98,7 +117,7 @@ class Agent(
 
             is GeminiResult.TextResponse -> {
 
-                memoryRepository.appendMessage(
+                memoryService.appendMessage(
                     conversationId,
                     "model",
                     geminiResult.text
@@ -118,7 +137,7 @@ class Agent(
     }
 
     private fun handleFunctionCalls(
-        conversationId: String,
+        conversationId: Long,
         calls: List<GeminiResult.FunctionCall>
     ): AgentResult {
 
@@ -132,7 +151,7 @@ class Agent(
                         "Gemini pidió usar la herramienta '${call.toolName}', que no existe."
                     )
 
-            memoryRepository.appendMessage(
+            memoryService.appendMessage(
                 conversationId,
                 "model",
                 "FUNCTION_CALL\n${call.toolName}\n${call.args}\n${call.thoughtSignature ?: ""}\n${call.id ?: ""}"
@@ -144,7 +163,7 @@ class Agent(
 
                     val output = tool.execute(call.args)
 
-                    memoryRepository.appendMessage(
+                    memoryService.appendMessage(
                         conversationId,
                         "function",
                         "${tool.name}\n$output\n${call.id ?: ""}"
@@ -193,7 +212,7 @@ class Agent(
             val finalOutput =
                 outputs.joinToString("\n")
 
-            memoryRepository.appendMessage(
+            memoryService.appendMessage(
                 conversationId,
                 "model",
                 finalOutput
@@ -222,7 +241,7 @@ class Agent(
 
         if (!approved) {
 
-            memoryRepository.appendMessage(
+            memoryService.appendMessage(
                 pending.conversationId,
                 "function",
                 "${pending.toolName}\nEl usuario canceló la acción."
@@ -239,7 +258,7 @@ class Agent(
 
         val output = tool.execute(pending.args)
 
-        memoryRepository.appendMessage(
+        memoryService.appendMessage(
             pending.conversationId,
             "function",
             "${tool.name}\n$output"

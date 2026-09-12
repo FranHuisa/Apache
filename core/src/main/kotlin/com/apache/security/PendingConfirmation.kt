@@ -9,10 +9,15 @@ import java.util.concurrent.ConcurrentHashMap
  * "Esta acción puede eliminar archivos. ¿Quieres que continúe?").
  */
 data class PendingConfirmation(
+
     val id: String = UUID.randomUUID().toString(),
-    val conversationId: String,
+
+    val conversationId: Long,
+
     val toolName: String,
+
     val args: Map<String, Any?>,
+
     val humanReadableWarning: String
 )
 
@@ -26,6 +31,7 @@ data class PendingConfirmation(
  * falta persistirlas, se movería a la base de datos igual que Conversation/Message.
  */
 object PendingConfirmationStore {
+
     private val store = ConcurrentHashMap<String, PendingConfirmation>()
 
     fun add(confirmation: PendingConfirmation): PendingConfirmation {

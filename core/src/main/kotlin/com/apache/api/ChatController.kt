@@ -20,11 +20,16 @@ import org.springframework.web.bind.annotation.*
 @RequestMapping("/api/chat")
 class ChatController(private val agent: Agent) {
 
-    @PostMapping
-    fun chat(@RequestBody request: ChatRequest): ChatResponse {
-        val (conversationId, result) = agent.handleMessage(request.conversationId, request.message)
-        return toResponse(conversationId, result)
-    }
+fun chat(@RequestBody request: ChatRequest): ChatResponse {
+
+    val (conversationId, result) =
+        agent.handleMessage(
+            request.conversationId,
+            request.message
+        )
+
+    return toResponse(conversationId, result)
+}
 
     @PostMapping("/confirm")
     fun confirm(@RequestBody request: ConfirmRequest): ChatResponse {

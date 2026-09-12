@@ -1,4 +1,135 @@
 # Bitácora de desarrollo — Apache
+## 12/09/2026 — feature/database
+
+### Configuración de base de datos MySQL
+
+### Objetivo
+
+Migrar la persistencia de Apache desde SQLite a MySQL y dejar preparada la arquitectura de acceso a datos para las funciones de Apache 0.1.
+
+### Trabajo realizado
+
+* Cambiada la configuración de Apache para utilizar MySQL como base de datos principal.
+* Añadido el driver JDBC de MySQL.
+* Configurada la conexión mediante `application.yml`:
+
+  * Base de datos `apache`.
+  * MySQL en `localhost:3306`.
+  * Usuario `root`.
+* Creada `DatabaseFactory` como punto único de conexión de Apache con la base de datos.
+* Definido el esquema inicial de Apache 0.1 con las entidades necesarias para:
+
+  * Usuarios y configuración.
+  * Memoria y contexto.
+  * Conversaciones y mensajes.
+  * Calendarios y eventos.
+  * Tareas.
+  * Recordatorios y notificaciones.
+  * Ejecuciones de herramientas.
+  * Permisos.
+* Añadidas las primeras tablas Exposed para trabajar con MySQL.
+* Creado `UserRepository` para acceder a los usuarios.
+* Creado `UserService` para separar la lógica de negocio del acceso a datos.
+* Creado `UserController` para exponer la información del usuario mediante la API REST.
+* Configurado el usuario inicial `default`.
+
+### Prueba realizada
+
+Se comprobó correctamente la comunicación completa:
+
+```text
+HTTP
+↓
+Controller
+↓
+Service
+↓
+Repository
+↓
+Exposed
+↓
+MySQL
+```
+
+Petición utilizada:
+
+```text
+GET http://localhost:8080/api/users/default
+```
+
+Respuesta obtenida correctamente:
+
+```json
+{
+  "id": 1,
+  "name": "default",
+  "displayName": "Fran",
+  "active": true,
+  "createdAt": "2026-09-11T22:04:26",
+  "updatedAt": "2026-09-11T22:04:26"
+}
+```
+
+### Incidencia solucionada
+
+* La tabla de usuarios estaba creada inicialmente como `user`, mientras que Apache esperaba `users`.
+* Se corrigió el nombre de la tabla mediante MySQL:
+
+```sql
+RENAME TABLE user TO users;
+```
+
+* Después del cambio, el endpoint volvió a funcionar correctamente.
+
+### Decisiones de diseño
+
+* MySQL será la base de datos principal de Apache 0.1.
+* Exposed será la capa utilizada para acceder a la base de datos desde Kotlin.
+* Apache no creará automáticamente las tablas desde `DatabaseFactory`.
+* La IA no accederá directamente a la base de datos.
+* Se mantiene la arquitectura:
+
+```text
+User
+↓
+AI
+↓
+Tool
+↓
+Service
+↓
+Repository
+↓
+Database
+```
+
+* La separación entre cliente, Core y base de datos se mantiene para poder añadir posteriormente el cliente móvil.
+
+### Pendiente / Mejoras futuras
+
+* Completar los mappings Exposed del resto de tablas.
+* Implementar la memoria/contexto de Apache.
+* Implementar conversaciones y mensajes.
+* Implementar calendario, eventos y tareas.
+* Añadir posteriormente recordatorios y notificaciones.
+
+### Estado actual
+
+* [x] MySQL configurado
+* [x] Driver JDBC de MySQL
+* [x] Conexión con MySQL funcionando
+* [x] Esquema inicial de Apache 0.1
+* [x] Usuario `default`
+* [x] Exposed configurado
+* [x] `UserRepository`
+* [x] `UserService`
+* [x] `UserController`
+* [x] Comunicación API → MySQL comprobada
+* [x] Problema de nombre de tabla solucionado
+
+### Siguiente fase
+
+Pasar a la implementación de **Memory / Context**, manteniendo la misma arquitectura de persistencia y trabajando sobre la base de datos MySQL ya configurada.
 
 ## 11/09/2026 — feature/voice
 
