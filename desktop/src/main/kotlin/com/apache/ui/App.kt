@@ -418,15 +418,26 @@ fun App() {
     // -----------------------------------------------------------------
     var pendingNotifications by remember { mutableStateOf<List<NotificationDto>>(emptyList()) }
 
+    // Ids descartados localmente (el usuario pulsó la "✕") a la espera de que
+    // el Core confirme el "marcar como leída". Compartido con el bucle de
+    // polling de más abajo para que no reaparezcan mientras esa confirmación
+    // está en vuelo. Ver el comentario dentro del LaunchedEffect.
+    val locallyDismissed = remember { mutableSetOf<Long>() }
+
     fun dismissNotification(id: Long) {
         pendingNotifications = pendingNotifications.filter { it.id != id }
+        locallyDismissed.add(id)
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 markNotificationRead(id)
             } catch (e: Exception) {
-                // Si falla la llamada de "marcar como leída" no pasa nada grave:
-                // en el próximo polling puede volver a aparecer, pero no rompemos la UI por esto.
+                // Si falla la llamada de "marcar como leída", deshacemos el
+                // descarte local: si no, la notificación quedaría oculta para
+                // siempre en el Desktop aunque el Core la siga marcando como
+                // no leída, y el usuario nunca podría volver a verla ni
+                // reintentar marcarla.
+                locallyDismissed.remove(id)
             }
         }
     }
@@ -436,9 +447,17 @@ LaunchedEffect(Unit) {
 
     while (true) {
         try {
-            val notifications = fetchUnreadNotifications()
+            // Igual que fetchCalendarEvents(): la llamada de red es bloqueante,
+            // así que la movemos fuera del hilo de UI.
+            val notifications = withContext(Dispatchers.IO) { fetchUnreadNotifications() }
 
-            notifications
+            // El servidor ya no reporta como no leído lo que se ha confirmado:
+            // podemos dejar de "recordarlo" como descartado localmente.
+            locallyDismissed.retainAll(notifications.map { it.id }.toSet())
+
+            val visibleNotifications = notifications.filterNot { it.id in locallyDismissed }
+
+            visibleNotifications
                 .filter { it.id !in shownNotifications }
                 .forEach { notification ->
                     println("NOTIFICACIÓN WINDOWS: ${notification.title}")
@@ -450,7 +469,7 @@ LaunchedEffect(Unit) {
                     shownNotifications.add(notification.id)
                 }
 
-            pendingNotifications = notifications
+            pendingNotifications = visibleNotifications
         } catch (e: Exception) {
             // El Core puede no estar arrancado todavía, o haberse caído: lo
             // ignoramos y lo volvemos a intentar en el siguiente ciclo.

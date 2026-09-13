@@ -75,6 +75,21 @@ class NotificationRepository {
         }
     }
 
+    /**
+     * Notificaciones ya leídas de un usuario (histórico), las más recientes primero.
+     *
+     * Se mantienen en la tabla en vez de borrarse físicamente: `readAt` solo
+     * tiene sentido si conservamos la fila, y así el usuario puede consultar
+     * más adelante qué recordatorios se han disparado.
+     */
+    fun findReadByUser(userId: Long): List<NotificationRecord> = transaction {
+        Notifications
+            .selectAll()
+            .where { (Notifications.userId eq userId) and (Notifications.read eq true) }
+            .orderBy(Notifications.createdAt, SortOrder.DESC)
+            .map { it.toRecord() }
+    }
+
     private fun ResultRow.toRecord() = NotificationRecord(
         id = this[Notifications.id],
         userId = this[Notifications.userId],

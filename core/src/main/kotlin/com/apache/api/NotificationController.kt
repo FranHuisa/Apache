@@ -31,6 +31,17 @@ class NotificationController(
             .listNotifications(ApacheDefaults.DEFAULT_USER_ID, onlyUnread)
             .map { it.toResponse() }
 
+    /**
+     * Histórico de notificaciones ya leídas (por ejemplo, para un panel de
+     * "notificaciones anteriores" en el Desktop). No hay borrado físico: ver
+     * [com.apache.database.repository.NotificationRepository.findReadByUser].
+     */
+    @GetMapping("/read")
+    fun listRead(): List<NotificationResponse> =
+        notificationService
+            .listRead(ApacheDefaults.DEFAULT_USER_ID)
+            .map { it.toResponse() }
+
     @PostMapping("/{id}/read")
     fun markRead(@PathVariable id: Long): MarkReadResponse =
         MarkReadResponse(success = notificationService.markRead(id))

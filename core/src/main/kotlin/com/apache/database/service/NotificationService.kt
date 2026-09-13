@@ -40,6 +40,10 @@ class NotificationService(
     fun listNotifications(userId: Long, onlyUnread: Boolean = false): List<NotificationRecord> =
         notificationRepository.findByUser(userId, onlyUnread)
 
+    /** Histórico de notificaciones ya leídas de un usuario. */
+    fun listRead(userId: Long): List<NotificationRecord> =
+        notificationRepository.findReadByUser(userId)
+
     fun markRead(notificationId: Long): Boolean =
         notificationRepository.markRead(notificationId)
 
