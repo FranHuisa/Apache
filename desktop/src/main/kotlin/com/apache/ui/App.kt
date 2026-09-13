@@ -22,11 +22,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.apache.audio.AudioPlayer
 import com.apache.audio.MicrophoneRecorder
+import com.apache.notifications.WindowsNotificationManager
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
-import java.util.Base64
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -37,7 +38,7 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import com.apache.notifications.WindowsNotificationManager
+
 // Representa un mensaje que aparece en el chat.
 data class ChatMessage(val text: String, val isUser: Boolean)
 
@@ -158,11 +159,7 @@ data class CreateCalendarEventDto(
 )
 
 private fun fetchCalendarEvents(): List<CalendarEventDto> {
-    val request =
-            Request.Builder()
-                    .url("http://localhost:8080/api/calendar/events")
-                    .get()
-                    .build()
+    val request = Request.Builder().url("http://localhost:8080/api/calendar/events").get().build()
 
     httpClient.newCall(request).execute().use { response ->
         val bodyText = response.body?.string().orEmpty()
@@ -180,13 +177,23 @@ private fun createCalendarEvent(event: CreateCalendarEventDto): CalendarEventDto
 
     httpClient.newCall(request).execute().use { response ->
         val bodyText = response.body?.string().orEmpty()
-        if (!response.isSuccessful) throw RuntimeException("No se ha podido crear el evento.")
+
+        if (!response.isSuccessful) {
+            throw RuntimeException(
+                    "Error ${response.code}: ${bodyText.ifBlank { "Sin respuesta del Core." }}"
+            )
+        }
+
         return objectMapper.readValue(bodyText)
     }
 }
 
 private fun calendarDateTime(): String =
-        LocalDateTime.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
+        LocalDateTime.now()
+                .plusHours(1)
+                .withMinute(0)
+                .withSecond(0)
+                .withNano(0)
                 .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
 
 private fun calendarDate(): String =
@@ -361,9 +368,9 @@ private fun synthesizeSpeech(text: String): VoiceSpeechResponse {
  * secundario, nunca desde el hilo de la interfaz. Si la síntesis de voz falla, no interrumpe la
  * conversación: la respuesta ya se ha mostrado en texto.
  *
- * Si [muted] es `true` (el usuario ha silenciado la voz de Apache), no se llega a llamar
- * siquiera al endpoint de Text-to-Speech: así evitamos gastar la llamada a Gemini para generar
- * un audio que no se va a reproducir.
+ * Si [muted] es `true` (el usuario ha silenciado la voz de Apache), no se llega a llamar siquiera
+ * al endpoint de Text-to-Speech: así evitamos gastar la llamada a Gemini para generar un audio que
+ * no se va a reproducir.
  */
 private fun speakReply(text: String, audioPlayer: AudioPlayer, muted: Boolean) {
 
@@ -446,42 +453,38 @@ fun App() {
         }
     }
 
-LaunchedEffect(Unit) {
-    val shownNotifications = mutableSetOf<Long>()
+    LaunchedEffect(Unit) {
+        val shownNotifications = mutableSetOf<Long>()
 
-    while (true) {
-        try {
-            // Igual que fetchCalendarEvents(): la llamada de red es bloqueante,
-            // así que la movemos fuera del hilo de UI.
-            val notifications = withContext(Dispatchers.IO) { fetchUnreadNotifications() }
+        while (true) {
+            try {
+                // Igual que fetchCalendarEvents(): la llamada de red es bloqueante,
+                // así que la movemos fuera del hilo de UI.
+                val notifications = withContext(Dispatchers.IO) { fetchUnreadNotifications() }
 
-            // El servidor ya no reporta como no leído lo que se ha confirmado:
-            // podemos dejar de "recordarlo" como descartado localmente.
-            locallyDismissed.retainAll(notifications.map { it.id }.toSet())
+                // El servidor ya no reporta como no leído lo que se ha confirmado:
+                // podemos dejar de "recordarlo" como descartado localmente.
+                locallyDismissed.retainAll(notifications.map { it.id }.toSet())
 
-            val visibleNotifications = notifications.filterNot { it.id in locallyDismissed }
+                val visibleNotifications = notifications.filterNot { it.id in locallyDismissed }
 
-            visibleNotifications
-                .filter { it.id !in shownNotifications }
-                .forEach { notification ->
+                visibleNotifications.filter { it.id !in shownNotifications }.forEach { notification
+                    ->
                     println("NOTIFICACIÓN WINDOWS: ${notification.title}")
-                    WindowsNotificationManager.show(
-                        notification.title,
-                        notification.message
-                    )
+                    WindowsNotificationManager.show(notification.title, notification.message)
 
                     shownNotifications.add(notification.id)
                 }
 
-            pendingNotifications = visibleNotifications
-        } catch (e: Exception) {
-            // El Core puede no estar arrancado todavía, o haberse caído: lo
-            // ignoramos y lo volvemos a intentar en el siguiente ciclo.
-        }
+                pendingNotifications = visibleNotifications
+            } catch (e: Exception) {
+                // El Core puede no estar arrancado todavía, o haberse caído: lo
+                // ignoramos y lo volvemos a intentar en el siguiente ciclo.
+            }
 
-        delay(15_000)
+            delay(15_000)
+        }
     }
-}
     // Controla qué sección de la interfaz está seleccionada.
     var selectedSection by remember { mutableStateOf("Chat") }
 
@@ -503,7 +506,8 @@ LaunchedEffect(Unit) {
             try {
                 calendarEvents = withContext(Dispatchers.IO) { fetchCalendarEvents() }
             } catch (_: Exception) {
-                calendarError = "No se ha podido conectar con el Core. Arráncalo y vuelve a intentarlo."
+                calendarError =
+                        "No se ha podido conectar con el Core. Arráncalo y vuelve a intentarlo."
             } finally {
                 calendarLoading = false
             }
@@ -536,16 +540,14 @@ LaunchedEffect(Unit) {
                 calendarDate = calendarDate()
                 calendarTime = calendarTime()
             } catch (_: Exception) {
-                calendarError = "Revisa la fecha y la hora, y confirma que el Core está iniciado."
+                calendarError = "No se ha podido crear el evento."
             } finally {
                 calendarLoading = false
             }
         }
     }
 
-    LaunchedEffect(selectedSection) {
-        if (selectedSection == "Calendario") loadCalendar()
-    }
+    LaunchedEffect(selectedSection) { if (selectedSection == "Calendario") loadCalendar() }
 
     // Controla la posición del scroll de la conversación.
     val chatListState = rememberLazyListState()
@@ -1026,16 +1028,25 @@ LaunchedEffect(Unit) {
                                     Text(text = "Asistente", color = Color.White, fontSize = 22.sp)
 
                                     Surface(
-                                            color = if (isMuted) Color(0xFF3A2020) else Color(0xFF1E2A22),
+                                            color =
+                                                    if (isMuted) Color(0xFF3A2020)
+                                                    else Color(0xFF1E2A22),
                                             shape = RoundedCornerShape(8.dp),
-                                            modifier =
-                                                    Modifier.clickable { isMuted = !isMuted }
+                                            modifier = Modifier.clickable { isMuted = !isMuted }
                                     ) {
                                         Text(
-                                                text = if (isMuted) "🔇 Voz silenciada" else "🔊 Voz activada",
-                                                color = if (isMuted) Color(0xFFE5A0A0) else Color(0xFFA7E8BE),
+                                                text =
+                                                        if (isMuted) "🔇 Voz silenciada"
+                                                        else "🔊 Voz activada",
+                                                color =
+                                                        if (isMuted) Color(0xFFE5A0A0)
+                                                        else Color(0xFFA7E8BE),
                                                 fontSize = 13.sp,
-                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                                modifier =
+                                                        Modifier.padding(
+                                                                horizontal = 12.dp,
+                                                                vertical = 6.dp
+                                                        )
                                         )
                                     }
                                 }
@@ -1205,7 +1216,6 @@ LaunchedEffect(Unit) {
                                 }
                             }
                         }
-
                         "Calendario" -> {
                             Column(
                                     modifier =
@@ -1219,7 +1229,11 @@ LaunchedEffect(Unit) {
                                         horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Column {
-                                        Text(text = "Calendario", color = Color.White, fontSize = 26.sp)
+                                        Text(
+                                                text = "Calendario",
+                                                color = Color.White,
+                                                fontSize = 26.sp
+                                        )
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
                                                 text = "Tus próximos 30 días",
@@ -1227,9 +1241,10 @@ LaunchedEffect(Unit) {
                                                 fontSize = 14.sp
                                         )
                                     }
-                                    TextButton(onClick = { loadCalendar() }, enabled = !calendarLoading) {
-                                        Text("Actualizar", color = Color(0xFF6FE19A))
-                                    }
+                                    TextButton(
+                                            onClick = { loadCalendar() },
+                                            enabled = !calendarLoading
+                                    ) { Text("Actualizar", color = Color(0xFF6FE19A)) }
                                 }
 
                                 Spacer(modifier = Modifier.height(24.dp))
@@ -1240,7 +1255,11 @@ LaunchedEffect(Unit) {
                                         shape = RoundedCornerShape(16.dp)
                                 ) {
                                     Column(modifier = Modifier.padding(20.dp)) {
-                                        Text(text = "Nuevo evento", color = Color.White, fontSize = 18.sp)
+                                        Text(
+                                                text = "Nuevo evento",
+                                                color = Color.White,
+                                                fontSize = 18.sp
+                                        )
                                         Spacer(modifier = Modifier.height(14.dp))
                                         OutlinedTextField(
                                                 value = calendarTitle,
@@ -1285,10 +1304,11 @@ LaunchedEffect(Unit) {
                                         Button(
                                                 onClick = { saveCalendarEvent() },
                                                 enabled = !calendarLoading,
-                                                colors = ButtonDefaults.buttonColors(
-                                                        containerColor = Color(0xFF1DB954),
-                                                        contentColor = Color.Black
-                                                )
+                                                colors =
+                                                        ButtonDefaults.buttonColors(
+                                                                containerColor = Color(0xFF1DB954),
+                                                                contentColor = Color.Black
+                                                        )
                                         ) { Text("Añadir al calendario") }
                                     }
                                 }
@@ -1299,7 +1319,11 @@ LaunchedEffect(Unit) {
                                 }
 
                                 Spacer(modifier = Modifier.height(26.dp))
-                                Text(text = "Próximos eventos", color = Color.White, fontSize = 19.sp)
+                                Text(
+                                        text = "Próximos eventos",
+                                        color = Color.White,
+                                        fontSize = 19.sp
+                                )
                                 Spacer(modifier = Modifier.height(12.dp))
 
                                 if (calendarLoading && calendarEvents.isEmpty()) {
@@ -1311,7 +1335,8 @@ LaunchedEffect(Unit) {
                                             shape = RoundedCornerShape(14.dp)
                                     ) {
                                         Text(
-                                                text = "No tienes eventos próximos. Crea el primero arriba.",
+                                                text =
+                                                        "No tienes eventos próximos. Crea el primero arriba.",
                                                 modifier = Modifier.padding(20.dp),
                                                 color = Color(0xFFB7C2BB)
                                         )
@@ -1319,7 +1344,9 @@ LaunchedEffect(Unit) {
                                 } else {
                                     calendarEvents.forEach { event ->
                                         Surface(
-                                                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                                                modifier =
+                                                        Modifier.fillMaxWidth()
+                                                                .padding(bottom = 10.dp),
                                                 color = Color(0xFF202A24),
                                                 shape = RoundedCornerShape(14.dp)
                                         ) {
@@ -1332,7 +1359,10 @@ LaunchedEffect(Unit) {
                                                         shape = RoundedCornerShape(10.dp)
                                                 ) {
                                                     Text(
-                                                            text = event.startAt.replace('T', ' ').take(16),
+                                                            text =
+                                                                    event.startAt
+                                                                            .replace('T', ' ')
+                                                                            .take(16),
                                                             modifier = Modifier.padding(10.dp),
                                                             color = Color.Black,
                                                             fontSize = 13.sp
@@ -1340,7 +1370,11 @@ LaunchedEffect(Unit) {
                                                 }
                                                 Spacer(modifier = Modifier.width(14.dp))
                                                 Column {
-                                                    Text(text = event.title, color = Color.White, fontSize = 16.sp)
+                                                    Text(
+                                                            text = event.title,
+                                                            color = Color.White,
+                                                            fontSize = 16.sp
+                                                    )
                                                     if (!event.location.isNullOrBlank()) {
                                                         Spacer(modifier = Modifier.height(3.dp))
                                                         Text(
@@ -1558,7 +1592,6 @@ LaunchedEffect(Unit) {
                             }
                         }
                     }
-
                 }
 
                 // Avisos no leídos, superpuestos en la esquina superior derecha.
@@ -1574,7 +1607,11 @@ LaunchedEffect(Unit) {
                                     horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = notification.title, color = Color.Black, fontSize = 14.sp)
+                                    Text(
+                                            text = notification.title,
+                                            color = Color.Black,
+                                            fontSize = 14.sp
+                                    )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                             text = notification.message,
@@ -1586,13 +1623,16 @@ LaunchedEffect(Unit) {
                                         text = "✕",
                                         color = Color.Black,
                                         fontSize = 14.sp,
-                                        modifier = Modifier.clickable { dismissNotification(notification.id) }
+                                        modifier =
+                                                Modifier.clickable {
+                                                    dismissNotification(notification.id)
+                                                }
                                 )
                             }
                         }
                     }
                 }
+            }
         }
     }
-}
 }
