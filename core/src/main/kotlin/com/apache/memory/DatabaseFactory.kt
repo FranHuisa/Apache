@@ -1,8 +1,13 @@
 package com.apache.memory
 
 import jakarta.annotation.PostConstruct
+
 import org.jetbrains.exposed.sql.Database
+
+import org.jetbrains.exposed.sql.transactions.transaction
+
 import org.springframework.beans.factory.annotation.Value
+
 import org.springframework.stereotype.Component
 
 /**
@@ -46,11 +51,35 @@ class DatabaseFactory(
         println("Usuario: $username")
         println("========================================")
 
-        Database.connect(
+        val database = Database.connect(
             url = url,
             driver = driver,
             user = username,
             password = password
         )
+
+        /**
+         * Las instalaciones existentes pueden tener la tabla `reminder` creada antes de
+         * que se añadiera la relación opcional con un evento de calendario. Esta migración
+         * es aditiva: conserva todos los recordatorios y solo crea la columna si falta.
+         */
+        transaction(database) {
+
+            val hasEventId = exec(
+                """
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'reminder'
+                  AND COLUMN_NAME = 'event_id'
+                """.trimIndent()
+            ) { resultSet ->
+                resultSet.next() && resultSet.getInt(1) > 0
+            } ?: false
+
+            if (!hasEventId) {
+                exec("ALTER TABLE reminder ADD COLUMN event_id BIGINT NULL")
+            }
+        }
     }
 }

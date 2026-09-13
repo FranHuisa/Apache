@@ -1,0 +1,1749 @@
+diff --git a/core/src/main/kotlin/com/apache/ApacheCoreApplication.kt b/core/src/main/kotlin/com/apache/ApacheCoreApplication.kt
+index dcebae3..d766953 100644
+--- a/core/src/main/kotlin/com/apache/ApacheCoreApplication.kt
++++ b/core/src/main/kotlin/com/apache/ApacheCoreApplication.kt
+@@ -2,6 +2,7 @@ package com.apache
+ 
+ import org.springframework.boot.autoconfigure.SpringBootApplication
+ import org.springframework.boot.runApplication
++import org.springframework.scheduling.annotation.EnableScheduling
+ 
+ /**
+  * Punto de entrada del "cerebro" de Apache. Al arrancar, Spring Boot:
+@@ -10,11 +11,16 @@ import org.springframework.boot.runApplication
+  *    @Component / @Repository / @RestController.
+  * 3. Inicializa los componentes necesarios del Core.
+  *
++ * @EnableScheduling activa el soporte de Spring para tareas periódicas
++ * (@Scheduled), usado por [com.apache.reminders.ReminderScheduler] para
++ * comprobar recordatorios pendientes.
++ *
+  * Este proceso corre en segundo plano en el PC del usuario; la app de
+  * escritorio (módulo `desktop`) es un proceso totalmente separado que
+  * le habla por HTTP en localhost.
+  */
+ @SpringBootApplication
++@EnableScheduling
+ class ApacheCoreApplication
+ 
+ fun main(args: Array<String>) {
+diff --git a/core/src/main/kotlin/com/apache/ApacheDefaults.kt b/core/src/main/kotlin/com/apache/ApacheDefaults.kt
+new file mode 100644
+index 0000000..4c460a2
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/ApacheDefaults.kt
+@@ -0,0 +1,17 @@
++package com.apache
++
++/**
++ * Valores por defecto compartidos por toda la aplicación mientras Apache no
++ * tiene gestión real de usuarios y sesiones.
++ *
++ * Apache 0.1 utiliza inicialmente el usuario `default`, creado durante la
++ * configuración inicial de MySQL, que corresponde al id 1.
++ *
++ * Centralizar esta constante evita tener el número "1L" repetido y sin
++ * explicar en Agent, las tools de calendario/tareas/recordatorios y los
++ * controladores REST. Cuando Apache tenga sesiones de usuario reales, este
++ * es el único sitio que habrá que tocar para dejar de asumir un usuario fijo.
++ */
++object ApacheDefaults {
++    const val DEFAULT_USER_ID: Long = 1L
++}
+diff --git a/core/src/main/kotlin/com/apache/agent/Agent.kt b/core/src/main/kotlin/com/apache/agent/Agent.kt
+index 3c0faaa..d5454d2 100644
+--- a/core/src/main/kotlin/com/apache/agent/Agent.kt
++++ b/core/src/main/kotlin/com/apache/agent/Agent.kt
+@@ -69,13 +69,9 @@ class Agent(
+     /**
+      * Apache 0.1 utiliza inicialmente el usuario `default`.
+      *
+-     * Este usuario se creó durante la configuración inicial de MySQL
+-     * y actualmente corresponde al id 1.
+-     *
+-     * Más adelante este valor dejará de estar fijado cuando Apache
+-     * tenga gestión de usuarios y sesiones.
++     * Ver [com.apache.ApacheDefaults.DEFAULT_USER_ID].
+      */
+-    private val defaultUserId = 1L
++    private val defaultUserId = com.apache.ApacheDefaults.DEFAULT_USER_ID
+ 
+     fun handleMessage(
+         conversationId: Long?,
+diff --git a/core/src/main/kotlin/com/apache/api/NotificationController.kt b/core/src/main/kotlin/com/apache/api/NotificationController.kt
+new file mode 100644
+index 0000000..4e2804b
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/api/NotificationController.kt
+@@ -0,0 +1,64 @@
++package com.apache.api
++
++import com.apache.ApacheDefaults
++import com.apache.database.repository.NotificationRecord
++import com.apache.database.service.NotificationService
++import org.springframework.web.bind.annotation.GetMapping
++import org.springframework.web.bind.annotation.PathVariable
++import org.springframework.web.bind.annotation.PostMapping
++import org.springframework.web.bind.annotation.RequestMapping
++import org.springframework.web.bind.annotation.RequestParam
++import org.springframework.web.bind.annotation.RestController
++
++/**
++ * Expone las notificaciones generadas por Apache (hoy, sobre todo, las que
++ * genera [com.apache.reminders.ReminderScheduler] al disparar un recordatorio)
++ * para que la app de escritorio pueda consultarlas mediante *polling* y
++ * mostrarlas al usuario.
++ */
++@RestController
++@RequestMapping("/api/notifications")
++class NotificationController(
++    private val notificationService: NotificationService
++) {
++
++    /** Lista las notificaciones del usuario. Por defecto, solo las no leídas. */
++    @GetMapping
++    fun list(
++        @RequestParam(defaultValue = "true") onlyUnread: Boolean
++    ): List<NotificationResponse> =
++        notificationService
++            .listNotifications(ApacheDefaults.DEFAULT_USER_ID, onlyUnread)
++            .map { it.toResponse() }
++
++    @PostMapping("/{id}/read")
++    fun markRead(@PathVariable id: Long): MarkReadResponse =
++        MarkReadResponse(success = notificationService.markRead(id))
++
++    @PostMapping("/read-all")
++    fun markAllRead(): MarkReadResponse =
++        MarkReadResponse(success = true, count = notificationService.markAllRead(ApacheDefaults.DEFAULT_USER_ID))
++}
++
++private fun NotificationRecord.toResponse() = NotificationResponse(
++    id = id,
++    type = type,
++    title = title,
++    message = message,
++    read = read,
++    createdAt = createdAt.toString()
++)
++
++data class NotificationResponse(
++    val id: Long,
++    val type: String,
++    val title: String,
++    val message: String,
++    val read: Boolean,
++    val createdAt: String
++)
++
++data class MarkReadResponse(
++    val success: Boolean,
++    val count: Int = if (success) 1 else 0
++)
+diff --git a/core/src/main/kotlin/com/apache/database/repository/CalendarRepository.kt b/core/src/main/kotlin/com/apache/database/repository/CalendarRepository.kt
+new file mode 100644
+index 0000000..ac73ff0
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/database/repository/CalendarRepository.kt
+@@ -0,0 +1,173 @@
++package com.apache.database.repository
++
++import com.apache.database.tables.CalendarEvents
++import com.apache.database.tables.Calendars
++import java.time.LocalDateTime
++import org.jetbrains.exposed.sql.ResultRow
++import org.jetbrains.exposed.sql.SortOrder
++import org.jetbrains.exposed.sql.and
++import org.jetbrains.exposed.sql.deleteWhere
++import org.jetbrains.exposed.sql.insert
++import org.jetbrains.exposed.sql.selectAll
++import org.jetbrains.exposed.sql.transactions.transaction
++import org.jetbrains.exposed.sql.update
++import org.springframework.stereotype.Repository
++
++/**
++ * Representación de un evento de calendario obtenida desde la base de datos.
++ * No es una tabla Exposed: es el objeto que usamos para transportar los datos.
++ */
++data class CalendarEventRecord(
++    val id: Long,
++    val calendarId: Long,
++    val title: String,
++    val description: String?,
++    val startAt: LocalDateTime,
++    val endAt: LocalDateTime?,
++    val location: String?,
++    val allDay: Boolean,
++    val status: String,
++    val createdAt: LocalDateTime,
++    val updatedAt: LocalDateTime
++)
++
++/**
++ * Repository encargado de acceder a las tablas `calendar` y `calendar_event`.
++ *
++ * Como Apache 0.1 no tiene todavía gestión de múltiples calendarios desde la
++ * interfaz, cada usuario tiene un único calendario "principal" que se crea
++ * automáticamente la primera vez que hace falta (mismo patrón que
++ * `MemoryRepository.getOrCreateConversation`).
++ */
++@Repository
++class CalendarRepository {
++
++    /** Obtiene el calendario principal del usuario, o lo crea si todavía no existe. */
++    fun getOrCreateDefaultCalendar(userId: Long): Long = transaction {
++
++        val existing = Calendars
++            .selectAll()
++            .where { (Calendars.userId eq userId) and (Calendars.active eq true) }
++            .orderBy(Calendars.id, SortOrder.ASC)
++            .firstOrNull()
++
++        if (existing != null) {
++            return@transaction existing[Calendars.id]
++        }
++
++        val now = LocalDateTime.now()
++
++        Calendars.insert {
++            it[Calendars.userId] = userId
++            it[Calendars.name] = "Principal"
++            it[Calendars.timezone] = "Europe/Madrid"
++            it[Calendars.active] = true
++            it[Calendars.createdAt] = now
++            it[Calendars.updatedAt] = now
++        } get Calendars.id
++    }
++
++    fun createEvent(
++        calendarId: Long,
++        title: String,
++        description: String?,
++        startAt: LocalDateTime,
++        endAt: LocalDateTime?,
++        location: String?,
++        allDay: Boolean
++    ): Long = transaction {
++
++        val now = LocalDateTime.now()
++
++        CalendarEvents.insert {
++            it[CalendarEvents.calendarId] = calendarId
++            it[CalendarEvents.title] = title
++            it[CalendarEvents.description] = description
++            it[CalendarEvents.startAt] = startAt
++            it[CalendarEvents.endAt] = endAt
++            it[CalendarEvents.location] = location
++            it[CalendarEvents.allDay] = allDay
++            it[CalendarEvents.status] = "confirmed"
++            it[CalendarEvents.createdAt] = now
++            it[CalendarEvents.updatedAt] = now
++        } get CalendarEvents.id
++    }
++
++    /** Eventos de un calendario cuyo `startAt` cae dentro de [from]..[to], ordenados cronológicamente. */
++    fun findEventsBetween(
++        calendarId: Long,
++        from: LocalDateTime,
++        to: LocalDateTime
++    ): List<CalendarEventRecord> = transaction {
++
++        CalendarEvents
++            .selectAll()
++            .where {
++                (CalendarEvents.calendarId eq calendarId) and
++                    (CalendarEvents.startAt greaterEq from) and
++                    (CalendarEvents.startAt lessEq to) and
++                    (CalendarEvents.status neq "cancelled")
++            }
++            .orderBy(CalendarEvents.startAt, SortOrder.ASC)
++            .map { it.toRecord() }
++    }
++
++    fun findEventById(eventId: Long): CalendarEventRecord? = transaction {
++        CalendarEvents
++            .selectAll()
++            .where { CalendarEvents.id eq eventId }
++            .singleOrNull()
++            ?.toRecord()
++    }
++
++    /** Actualiza solo los campos no nulos que se pasen; el resto se deja como estaba. */
++    fun updateEvent(
++        eventId: Long,
++        title: String?,
++        description: String?,
++        startAt: LocalDateTime?,
++        endAt: LocalDateTime?,
++        location: String?
++    ): Boolean = transaction {
++
++        val current = CalendarEvents
++            .selectAll()
++            .where { CalendarEvents.id eq eventId }
++            .singleOrNull() ?: return@transaction false
++
++        CalendarEvents.update({ CalendarEvents.id eq eventId }) {
++            it[CalendarEvents.title] = title ?: current[CalendarEvents.title]
++            it[CalendarEvents.description] = description ?: current[CalendarEvents.description]
++            it[CalendarEvents.startAt] = startAt ?: current[CalendarEvents.startAt]
++            it[CalendarEvents.endAt] = endAt ?: current[CalendarEvents.endAt]
++            it[CalendarEvents.location] = location ?: current[CalendarEvents.location]
++            it[CalendarEvents.updatedAt] = LocalDateTime.now()
++        } > 0
++    }
++
++    /** Cancela un evento (borrado lógico) en lugar de eliminar la fila. */
++    fun cancelEvent(eventId: Long): Boolean = transaction {
++        CalendarEvents.update({ CalendarEvents.id eq eventId }) {
++            it[CalendarEvents.status] = "cancelled"
++            it[CalendarEvents.updatedAt] = LocalDateTime.now()
++        } > 0
++    }
++
++    fun deleteEvent(eventId: Long): Boolean = transaction {
++        CalendarEvents.deleteWhere { CalendarEvents.id eq eventId } > 0
++    }
++
++    private fun ResultRow.toRecord() = CalendarEventRecord(
++        id = this[CalendarEvents.id],
++        calendarId = this[CalendarEvents.calendarId],
++        title = this[CalendarEvents.title],
++        description = this[CalendarEvents.description],
++        startAt = this[CalendarEvents.startAt],
++        endAt = this[CalendarEvents.endAt],
++        location = this[CalendarEvents.location],
++        allDay = this[CalendarEvents.allDay],
++        status = this[CalendarEvents.status],
++        createdAt = this[CalendarEvents.createdAt],
++        updatedAt = this[CalendarEvents.updatedAt]
++    )
++}
+diff --git a/core/src/main/kotlin/com/apache/database/repository/NotificationRepository.kt b/core/src/main/kotlin/com/apache/database/repository/NotificationRepository.kt
+new file mode 100644
+index 0000000..807eb64
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/database/repository/NotificationRepository.kt
+@@ -0,0 +1,88 @@
++package com.apache.database.repository
++
++import com.apache.database.tables.Notifications
++import java.time.LocalDateTime
++import org.jetbrains.exposed.sql.ResultRow
++import org.jetbrains.exposed.sql.SortOrder
++import org.jetbrains.exposed.sql.and
++import org.jetbrains.exposed.sql.insert
++import org.jetbrains.exposed.sql.selectAll
++import org.jetbrains.exposed.sql.transactions.transaction
++import org.jetbrains.exposed.sql.update
++import org.springframework.stereotype.Repository
++
++/** Representación de una notificación obtenida desde la base de datos. */
++data class NotificationRecord(
++    val id: Long,
++    val userId: Long,
++    val type: String,
++    val title: String,
++    val message: String,
++    val read: Boolean,
++    val createdAt: LocalDateTime,
++    val readAt: LocalDateTime?
++)
++
++/** Repository encargado de acceder a la tabla `notification`. */
++@Repository
++class NotificationRepository {
++
++    fun create(
++        userId: Long,
++        type: String,
++        title: String,
++        message: String
++    ): Long = transaction {
++
++        Notifications.insert {
++            it[Notifications.userId] = userId
++            it[Notifications.type] = type
++            it[Notifications.title] = title
++            it[Notifications.message] = message
++            it[Notifications.read] = false
++            it[Notifications.createdAt] = LocalDateTime.now()
++        } get Notifications.id
++    }
++
++    /** Notificaciones de un usuario, las más recientes primero. */
++    fun findByUser(userId: Long, onlyUnread: Boolean = false): List<NotificationRecord> = transaction {
++
++        val condition = if (onlyUnread) {
++            (Notifications.userId eq userId) and (Notifications.read eq false)
++        } else {
++            Notifications.userId eq userId
++        }
++
++        Notifications
++            .selectAll()
++            .where { condition }
++            .orderBy(Notifications.createdAt, SortOrder.DESC)
++            .map { it.toRecord() }
++    }
++
++    fun markRead(notificationId: Long): Boolean = transaction {
++        Notifications.update({ Notifications.id eq notificationId }) {
++            it[Notifications.read] = true
++            it[Notifications.readAt] = LocalDateTime.now()
++        } > 0
++    }
++
++    /** Marca como leídas todas las notificaciones pendientes de un usuario. Devuelve cuántas afectó. */
++    fun markAllRead(userId: Long): Int = transaction {
++        Notifications.update({ (Notifications.userId eq userId) and (Notifications.read eq false) }) {
++            it[Notifications.read] = true
++            it[Notifications.readAt] = LocalDateTime.now()
++        }
++    }
++
++    private fun ResultRow.toRecord() = NotificationRecord(
++        id = this[Notifications.id],
++        userId = this[Notifications.userId],
++        type = this[Notifications.type],
++        title = this[Notifications.title],
++        message = this[Notifications.message],
++        read = this[Notifications.read],
++        createdAt = this[Notifications.createdAt],
++        readAt = this[Notifications.readAt]
++    )
++}
+diff --git a/core/src/main/kotlin/com/apache/database/repository/ReminderRepository.kt b/core/src/main/kotlin/com/apache/database/repository/ReminderRepository.kt
+new file mode 100644
+index 0000000..b556095
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/database/repository/ReminderRepository.kt
+@@ -0,0 +1,133 @@
++package com.apache.database.repository
++
++import com.apache.database.tables.Reminders
++import java.time.LocalDateTime
++import org.jetbrains.exposed.sql.ResultRow
++import org.jetbrains.exposed.sql.SortOrder
++import org.jetbrains.exposed.sql.and
++import org.jetbrains.exposed.sql.insert
++import org.jetbrains.exposed.sql.selectAll
++import org.jetbrains.exposed.sql.transactions.transaction
++import org.jetbrains.exposed.sql.update
++import org.springframework.stereotype.Repository
++
++/**
++ * Estados posibles de un recordatorio. Se guardan como texto en la
++ * columna `status` de la tabla `reminder` (ver [Reminders]).
++ */
++object ReminderStatus {
++    /** Todavía no ha llegado su `triggerAt`. */
++    const val PENDING = "pending"
++
++    /** Ya se ejecutó: el [com.apache.reminders.ReminderScheduler] generó su notificación. */
++    const val TRIGGERED = "triggered"
++
++    /** Cancelado manualmente antes de dispararse. */
++    const val CANCELLED = "cancelled"
++}
++
++/** Representación de un recordatorio obtenida desde la base de datos. */
++data class ReminderRecord(
++    val id: Long,
++    val userId: Long,
++    val eventId: Long?,
++    val title: String,
++    val message: String?,
++    val triggerAt: LocalDateTime,
++    val status: String,
++    val createdAt: LocalDateTime,
++    val updatedAt: LocalDateTime
++)
++
++/** Repository encargado de acceder a la tabla `reminder`. */
++@Repository
++class ReminderRepository {
++
++    fun create(
++        userId: Long,
++        title: String,
++        message: String?,
++        triggerAt: LocalDateTime,
++        eventId: Long? = null
++    ): Long = transaction {
++
++        val now = LocalDateTime.now()
++
++        Reminders.insert {
++            it[Reminders.userId] = userId
++            it[Reminders.eventId] = eventId
++            it[Reminders.title] = title
++            it[Reminders.message] = message
++            it[Reminders.triggerAt] = triggerAt
++            it[Reminders.status] = ReminderStatus.PENDING
++            it[Reminders.createdAt] = now
++            it[Reminders.updatedAt] = now
++        } get Reminders.id
++    }
++
++    fun findByUser(userId: Long, includeFinished: Boolean = false): List<ReminderRecord> = transaction {
++
++        val condition = if (includeFinished) {
++            Reminders.userId eq userId
++        } else {
++            (Reminders.userId eq userId) and (Reminders.status eq ReminderStatus.PENDING)
++        }
++
++        Reminders
++            .selectAll()
++            .where { condition }
++            .orderBy(Reminders.triggerAt, SortOrder.ASC)
++            .map { it.toRecord() }
++    }
++
++    fun findById(reminderId: Long): ReminderRecord? = transaction {
++        Reminders
++            .selectAll()
++            .where { Reminders.id eq reminderId }
++            .singleOrNull()
++            ?.toRecord()
++    }
++
++    /**
++     * Recordatorios cuyo `triggerAt` ya ha pasado y siguen en estado PENDING.
++     *
++     * Usado por [com.apache.reminders.ReminderScheduler] en cada "tick" para
++     * saber cuáles tiene que disparar en forma de notificación.
++     */
++    fun findDuePending(now: LocalDateTime): List<ReminderRecord> = transaction {
++        Reminders
++            .selectAll()
++            .where {
++                (Reminders.status eq ReminderStatus.PENDING) and
++                    (Reminders.triggerAt lessEq now)
++            }
++            .orderBy(Reminders.triggerAt, SortOrder.ASC)
++            .map { it.toRecord() }
++    }
++
++    fun markTriggered(reminderId: Long): Boolean = transaction {
++        Reminders.update({ Reminders.id eq reminderId }) {
++            it[Reminders.status] = ReminderStatus.TRIGGERED
++            it[Reminders.updatedAt] = LocalDateTime.now()
++        } > 0
++    }
++
++    fun cancel(reminderId: Long): Boolean = transaction {
++        Reminders.update({ Reminders.id eq reminderId }) {
++            it[Reminders.status] = ReminderStatus.CANCELLED
++            it[Reminders.updatedAt] = LocalDateTime.now()
++        } > 0
++    }
++
++    private fun ResultRow.toRecord() = ReminderRecord(
++        id = this[Reminders.id],
++        userId = this[Reminders.userId],
++        eventId = this[Reminders.eventId],
++        title = this[Reminders.title],
++        message = this[Reminders.message],
++        triggerAt = this[Reminders.triggerAt],
++        status = this[Reminders.status],
++        createdAt = this[Reminders.createdAt],
++        updatedAt = this[Reminders.updatedAt]
++    )
++}
+diff --git a/core/src/main/kotlin/com/apache/database/repository/TaskRepository.kt b/core/src/main/kotlin/com/apache/database/repository/TaskRepository.kt
+new file mode 100644
+index 0000000..233980a
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/database/repository/TaskRepository.kt
+@@ -0,0 +1,141 @@
++package com.apache.database.repository
++
++import com.apache.database.tables.Tasks
++import java.time.LocalDateTime
++import org.jetbrains.exposed.sql.ResultRow
++import org.jetbrains.exposed.sql.SortOrder
++import org.jetbrains.exposed.sql.and
++import org.jetbrains.exposed.sql.deleteWhere
++import org.jetbrains.exposed.sql.insert
++import org.jetbrains.exposed.sql.selectAll
++import org.jetbrains.exposed.sql.transactions.transaction
++import org.jetbrains.exposed.sql.update
++import org.springframework.stereotype.Repository
++
++/**
++ * Estados posibles de una tarea. Se guardan como texto en la columna
++ * `status` de la tabla `task` (ver [Tasks]).
++ */
++object TaskStatus {
++    const val PENDING = "pending"
++    const val COMPLETED = "completed"
++}
++
++/** Representación de una tarea obtenida desde la base de datos. */
++data class TaskRecord(
++    val id: Long,
++    val userId: Long,
++    val title: String,
++    val description: String?,
++    val status: String,
++    val priority: String,
++    val dueAt: LocalDateTime?,
++    val completedAt: LocalDateTime?,
++    val createdAt: LocalDateTime,
++    val updatedAt: LocalDateTime
++)
++
++/** Repository encargado de acceder a la tabla `task`. */
++@Repository
++class TaskRepository {
++
++    fun create(
++        userId: Long,
++        title: String,
++        description: String?,
++        priority: String,
++        dueAt: LocalDateTime?
++    ): Long = transaction {
++
++        val now = LocalDateTime.now()
++
++        Tasks.insert {
++            it[Tasks.userId] = userId
++            it[Tasks.title] = title
++            it[Tasks.description] = description
++            it[Tasks.status] = TaskStatus.PENDING
++            it[Tasks.priority] = priority
++            it[Tasks.dueAt] = dueAt
++            it[Tasks.createdAt] = now
++            it[Tasks.updatedAt] = now
++        } get Tasks.id
++    }
++
++    /**
++     * Lista las tareas de un usuario.
++     *
++     * @param includeCompleted si es false (por defecto), solo devuelve las pendientes.
++     */
++    fun findByUser(userId: Long, includeCompleted: Boolean = false): List<TaskRecord> = transaction {
++
++        val condition = if (includeCompleted) {
++            Tasks.userId eq userId
++        } else {
++            (Tasks.userId eq userId) and (Tasks.status eq TaskStatus.PENDING)
++        }
++
++        Tasks
++            .selectAll()
++            .where { condition }
++            .orderBy(
++                Tasks.dueAt to SortOrder.ASC_NULLS_LAST,
++                Tasks.createdAt to SortOrder.DESC
++            )
++            .map { it.toRecord() }
++    }
++
++    fun findById(taskId: Long): TaskRecord? = transaction {
++        Tasks
++            .selectAll()
++            .where { Tasks.id eq taskId }
++            .singleOrNull()
++            ?.toRecord()
++    }
++
++    fun markCompleted(taskId: Long): Boolean = transaction {
++        Tasks.update({ Tasks.id eq taskId }) {
++            it[Tasks.status] = TaskStatus.COMPLETED
++            it[Tasks.completedAt] = LocalDateTime.now()
++            it[Tasks.updatedAt] = LocalDateTime.now()
++        } > 0
++    }
++
++    fun update(
++        taskId: Long,
++        title: String?,
++        description: String?,
++        priority: String?,
++        dueAt: LocalDateTime?
++    ): Boolean = transaction {
++
++        val current = Tasks
++            .selectAll()
++            .where { Tasks.id eq taskId }
++            .singleOrNull() ?: return@transaction false
++
++        Tasks.update({ Tasks.id eq taskId }) {
++            it[Tasks.title] = title ?: current[Tasks.title]
++            it[Tasks.description] = description ?: current[Tasks.description]
++            it[Tasks.priority] = priority ?: current[Tasks.priority]
++            it[Tasks.dueAt] = dueAt ?: current[Tasks.dueAt]
++            it[Tasks.updatedAt] = LocalDateTime.now()
++        } > 0
++    }
++
++    fun delete(taskId: Long): Boolean = transaction {
++        Tasks.deleteWhere { Tasks.id eq taskId } > 0
++    }
++
++    private fun ResultRow.toRecord() = TaskRecord(
++        id = this[Tasks.id],
++        userId = this[Tasks.userId],
++        title = this[Tasks.title],
++        description = this[Tasks.description],
++        status = this[Tasks.status],
++        priority = this[Tasks.priority],
++        dueAt = this[Tasks.dueAt],
++        completedAt = this[Tasks.completedAt],
++        createdAt = this[Tasks.createdAt],
++        updatedAt = this[Tasks.updatedAt]
++    )
++}
+diff --git a/core/src/main/kotlin/com/apache/database/service/CalendarService.kt b/core/src/main/kotlin/com/apache/database/service/CalendarService.kt
+new file mode 100644
+index 0000000..7a78194
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/database/service/CalendarService.kt
+@@ -0,0 +1,94 @@
++package com.apache.database.service
++
++import com.apache.database.repository.CalendarEventRecord
++import com.apache.database.repository.CalendarRepository
++import java.time.LocalDateTime
++import org.springframework.stereotype.Service
++
++/**
++ * Capa de servicio de calendario y eventos.
++ *
++ * Igual que [com.apache.memory.MemoryService], concentra la validación y
++ * las reglas de negocio; el Repository solo sabe hablar con Exposed/MySQL.
++ */
++@Service
++class CalendarService(
++    private val calendarRepository: CalendarRepository
++) {
++
++    fun createEvent(
++        userId: Long,
++        title: String,
++        description: String? = null,
++        startAt: LocalDateTime,
++        endAt: LocalDateTime? = null,
++        location: String? = null,
++        allDay: Boolean = false
++    ): CalendarEventRecord {
++
++        require(title.isNotBlank()) {
++            "El título del evento no puede estar vacío."
++        }
++
++        if (endAt != null) {
++            require(!endAt.isBefore(startAt)) {
++                "La fecha de fin del evento no puede ser anterior a la de inicio."
++            }
++        }
++
++        val calendarId = calendarRepository.getOrCreateDefaultCalendar(userId)
++
++        val eventId = calendarRepository.createEvent(
++            calendarId = calendarId,
++            title = title,
++            description = description,
++            startAt = startAt,
++            endAt = endAt,
++            location = location,
++            allDay = allDay
++        )
++
++        return calendarRepository.findEventById(eventId)
++            ?: error("No se ha podido recuperar el evento recién creado (id=$eventId).")
++    }
++
++    /** Eventos del usuario entre dos fechas, ambas inclusive. */
++    fun getEvents(userId: Long, from: LocalDateTime, to: LocalDateTime): List<CalendarEventRecord> {
++
++        require(!to.isBefore(from)) {
++            "La fecha 'hasta' no puede ser anterior a la fecha 'desde'."
++        }
++
++        val calendarId = calendarRepository.getOrCreateDefaultCalendar(userId)
++        return calendarRepository.findEventsBetween(calendarId, from, to)
++    }
++
++    fun getEvent(eventId: Long): CalendarEventRecord? =
++        calendarRepository.findEventById(eventId)
++
++    fun updateEvent(
++        eventId: Long,
++        title: String? = null,
++        description: String? = null,
++        startAt: LocalDateTime? = null,
++        endAt: LocalDateTime? = null,
++        location: String? = null
++    ): Boolean {
++
++        require(calendarRepository.findEventById(eventId) != null) {
++            "El evento con id=$eventId no existe."
++        }
++
++        return calendarRepository.updateEvent(
++            eventId = eventId,
++            title = title,
++            description = description,
++            startAt = startAt,
++            endAt = endAt,
++            location = location
++        )
++    }
++
++    fun deleteEvent(eventId: Long): Boolean =
++        calendarRepository.cancelEvent(eventId)
++}
+diff --git a/core/src/main/kotlin/com/apache/database/service/NotificationService.kt b/core/src/main/kotlin/com/apache/database/service/NotificationService.kt
+new file mode 100644
+index 0000000..6feb20b
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/database/service/NotificationService.kt
+@@ -0,0 +1,48 @@
++package com.apache.database.service
++
++import com.apache.database.repository.NotificationRecord
++import com.apache.database.repository.NotificationRepository
++import org.springframework.stereotype.Service
++
++/** Tipos de notificación que genera Apache. */
++object NotificationType {
++    const val REMINDER = "reminder"
++    const val SYSTEM = "system"
++}
++
++/** Capa de servicio de notificaciones. */
++@Service
++class NotificationService(
++    private val notificationRepository: NotificationRepository
++) {
++
++    fun create(
++        userId: Long,
++        title: String,
++        message: String,
++        type: String = NotificationType.SYSTEM
++    ): NotificationRecord {
++
++        require(title.isNotBlank()) {
++            "El título de la notificación no puede estar vacío."
++        }
++
++        val id = notificationRepository.create(
++            userId = userId,
++            type = type,
++            title = title,
++            message = message
++        )
++
++        return notificationRepository.findByUser(userId).first { it.id == id }
++    }
++
++    fun listNotifications(userId: Long, onlyUnread: Boolean = false): List<NotificationRecord> =
++        notificationRepository.findByUser(userId, onlyUnread)
++
++    fun markRead(notificationId: Long): Boolean =
++        notificationRepository.markRead(notificationId)
++
++    fun markAllRead(userId: Long): Int =
++        notificationRepository.markAllRead(userId)
++}
+diff --git a/core/src/main/kotlin/com/apache/database/service/ReminderService.kt b/core/src/main/kotlin/com/apache/database/service/ReminderService.kt
+new file mode 100644
+index 0000000..d920bb2
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/database/service/ReminderService.kt
+@@ -0,0 +1,86 @@
++package com.apache.database.service
++
++import com.apache.database.repository.ReminderRecord
++import com.apache.database.repository.ReminderRepository
++import java.time.LocalDateTime
++import org.slf4j.LoggerFactory
++import org.springframework.stereotype.Service
++
++/** Capa de servicio de recordatorios. */
++@Service
++class ReminderService(
++    private val reminderRepository: ReminderRepository,
++    private val notificationService: NotificationService
++) {
++
++    private val logger = LoggerFactory.getLogger(ReminderService::class.java)
++
++    fun createReminder(
++        userId: Long,
++        title: String,
++        message: String? = null,
++        triggerAt: LocalDateTime,
++        eventId: Long? = null
++    ): ReminderRecord {
++
++        require(title.isNotBlank()) {
++            "El título del recordatorio no puede estar vacío."
++        }
++
++        require(triggerAt.isAfter(LocalDateTime.now())) {
++            "La fecha del recordatorio debe ser futura."
++        }
++
++        val id = reminderRepository.create(
++            userId = userId,
++            title = title,
++            message = message,
++            triggerAt = triggerAt,
++            eventId = eventId
++        )
++
++        return reminderRepository.findById(id)
++            ?: error("No se ha podido recuperar el recordatorio recién creado (id=$id).")
++    }
++
++    fun listReminders(userId: Long, includeFinished: Boolean = false): List<ReminderRecord> =
++        reminderRepository.findByUser(userId, includeFinished)
++
++    fun cancelReminder(reminderId: Long): Boolean =
++        reminderRepository.cancel(reminderId)
++
++    /**
++     * Busca todos los recordatorios pendientes cuya hora ya ha llegado, genera
++     * una notificación por cada uno y los marca como disparados.
++     *
++     * Llamado periódicamente por [com.apache.reminders.ReminderScheduler]. Vive
++     * aquí (y no en el scheduler) para poder probarlo sin depender de Spring
++     * `@Scheduled` ni de temporizadores reales.
++     *
++     * @return los recordatorios que se han disparado en esta pasada.
++     */
++    fun processDueReminders(now: LocalDateTime = LocalDateTime.now()): List<ReminderRecord> {
++
++        val due = reminderRepository.findDuePending(now)
++
++        due.forEach { reminder ->
++            try {
++                notificationService.create(
++                    userId = reminder.userId,
++                    title = reminder.title,
++                    message = reminder.message ?: "Recordatorio: ${reminder.title}",
++                    type = NotificationType.REMINDER
++                )
++
++                reminderRepository.markTriggered(reminder.id)
++            } catch (e: Exception) {
++                // Si falla uno, seguimos con el resto: un recordatorio roto no debe
++                // bloquear la notificación de los demás. Se reintentará en el
++                // siguiente "tick" porque no se ha marcado como triggered.
++                logger.warn("No se pudo procesar el recordatorio id=${reminder.id}: ${e.message}")
++            }
++        }
++
++        return due
++    }
++}
+diff --git a/core/src/main/kotlin/com/apache/database/service/TaskService.kt b/core/src/main/kotlin/com/apache/database/service/TaskService.kt
+new file mode 100644
+index 0000000..c6438c9
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/database/service/TaskService.kt
+@@ -0,0 +1,87 @@
++package com.apache.database.service
++
++import com.apache.database.repository.TaskRecord
++import com.apache.database.repository.TaskRepository
++import java.time.LocalDateTime
++import org.springframework.stereotype.Service
++
++/** Prioridades válidas para una tarea. */
++object TaskPriority {
++    const val LOW = "low"
++    const val MEDIUM = "medium"
++    const val HIGH = "high"
++
++    val ALL = setOf(LOW, MEDIUM, HIGH)
++
++    /** Normaliza cualquier texto de prioridad recibido (de Gemini, de la UI...) a un valor válido. */
++    fun normalize(value: String?): String {
++        val normalized = value?.trim()?.lowercase()
++        return if (normalized in ALL) normalized!! else MEDIUM
++    }
++}
++
++/** Capa de servicio de tareas. */
++@Service
++class TaskService(
++    private val taskRepository: TaskRepository
++) {
++
++    fun createTask(
++        userId: Long,
++        title: String,
++        description: String? = null,
++        priority: String? = null,
++        dueAt: LocalDateTime? = null
++    ): TaskRecord {
++
++        require(title.isNotBlank()) {
++            "El título de la tarea no puede estar vacío."
++        }
++
++        val taskId = taskRepository.create(
++            userId = userId,
++            title = title,
++            description = description,
++            priority = TaskPriority.normalize(priority),
++            dueAt = dueAt
++        )
++
++        return taskRepository.findById(taskId)
++            ?: error("No se ha podido recuperar la tarea recién creada (id=$taskId).")
++    }
++
++    fun listTasks(userId: Long, includeCompleted: Boolean = false): List<TaskRecord> =
++        taskRepository.findByUser(userId, includeCompleted)
++
++    fun getTask(taskId: Long): TaskRecord? = taskRepository.findById(taskId)
++
++    fun completeTask(taskId: Long): Boolean {
++        require(taskRepository.findById(taskId) != null) {
++            "La tarea con id=$taskId no existe."
++        }
++        return taskRepository.markCompleted(taskId)
++    }
++
++    fun updateTask(
++        taskId: Long,
++        title: String? = null,
++        description: String? = null,
++        priority: String? = null,
++        dueAt: LocalDateTime? = null
++    ): Boolean {
++
++        require(taskRepository.findById(taskId) != null) {
++            "La tarea con id=$taskId no existe."
++        }
++
++        return taskRepository.update(
++            taskId = taskId,
++            title = title,
++            description = description,
++            priority = priority?.let { TaskPriority.normalize(it) },
++            dueAt = dueAt
++        )
++    }
++
++    fun deleteTask(taskId: Long): Boolean = taskRepository.delete(taskId)
++}
+diff --git a/core/src/main/kotlin/com/apache/reminders/ReminderScheduler.kt b/core/src/main/kotlin/com/apache/reminders/ReminderScheduler.kt
+new file mode 100644
+index 0000000..a28c3d1
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/reminders/ReminderScheduler.kt
+@@ -0,0 +1,38 @@
++package com.apache.reminders
++
++import com.apache.database.service.ReminderService
++import org.slf4j.LoggerFactory
++import org.springframework.scheduling.annotation.Scheduled
++import org.springframework.stereotype.Component
++
++/**
++ * Comprueba periódicamente si hay recordatorios que ya han llegado a su
++ * `triggerAt` y, si es así, delega en [ReminderService] para convertirlos
++ * en notificaciones.
++ *
++ * La comprobación cada 30 segundos es más que suficiente para un asistente
++ * personal de un único usuario: no necesitamos precisión de segundos, y así
++ * evitamos abrir transacciones contra MySQL constantemente.
++ */
++@Component
++class ReminderScheduler(
++    private val reminderService: ReminderService
++) {
++
++    private val logger = LoggerFactory.getLogger(ReminderScheduler::class.java)
++
++    @Scheduled(fixedDelay = 30_000)
++    fun checkDueReminders() {
++        try {
++            val triggered = reminderService.processDueReminders()
++
++            if (triggered.isNotEmpty()) {
++                logger.info("Disparados ${triggered.size} recordatorio(s): ${triggered.map { it.title }}")
++            }
++        } catch (e: Exception) {
++            // Un fallo puntual (ej. MySQL momentáneamente caído) no debe tumbar
++            // el scheduler: se reintentará automáticamente en el siguiente tick.
++            logger.error("Error comprobando recordatorios pendientes: ${e.message}", e)
++        }
++    }
++}
+diff --git a/core/src/main/kotlin/com/apache/tools/CalendarTools.kt b/core/src/main/kotlin/com/apache/tools/CalendarTools.kt
+new file mode 100644
+index 0000000..ce45273
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/tools/CalendarTools.kt
+@@ -0,0 +1,220 @@
++package com.apache.tools
++
++import com.apache.ApacheDefaults
++import com.apache.database.repository.CalendarEventRecord
++import com.apache.database.service.CalendarService
++import java.time.LocalDate
++import org.springframework.stereotype.Component
++
++private fun CalendarEventRecord.describe(): String {
++    val range = if (endAt != null) {
++        "${ToolDateParsing.formatForUser(startAt)} → ${ToolDateParsing.formatForUser(endAt)}"
++    } else {
++        ToolDateParsing.formatForUser(startAt)
++    }
++
++    val locationPart = location?.let { " en $it" } ?: ""
++
++    return "#$id · $title · $range$locationPart"
++}
++
++/** Tool que crea un evento nuevo en el calendario principal del usuario. */
++@Component
++class CreateCalendarEventTool(
++    private val calendarService: CalendarService
++) : Tool {
++
++    override val name = "createCalendarEvent"
++
++    override val description =
++        "Crea un evento nuevo en el calendario del usuario (una reunión, cita o cualquier " +
++            "compromiso con fecha y hora). Úsalo cuando el usuario pida agendar, programar o " +
++            "añadir algo a su calendario."
++
++    override val riskLevel = RiskLevel.REVERSIBLE
++
++    override val parametersSchema: Map<String, Any?> = mapOf(
++        "type" to "object",
++        "properties" to mapOf(
++            "title" to mapOf(
++                "type" to "string",
++                "description" to "Título del evento, ej: 'Reunión con el equipo'."
++            ),
++            "startAt" to mapOf(
++                "type" to "string",
++                "description" to "Fecha y hora de inicio en formato ISO 'yyyy-MM-ddTHH:mm', ej: '2026-09-15T18:30'."
++            ),
++            "endAt" to mapOf(
++                "type" to "string",
++                "description" to "Fecha y hora de fin, mismo formato que startAt. Opcional."
++            ),
++            "description" to mapOf(
++                "type" to "string",
++                "description" to "Detalles adicionales del evento. Opcional."
++            ),
++            "location" to mapOf(
++                "type" to "string",
++                "description" to "Lugar del evento. Opcional."
++            )
++        ),
++        "required" to listOf("title", "startAt")
++    )
++
++    override fun execute(args: Map<String, Any?>): String {
++        val title = (args["title"] as? String)?.trim()
++            ?: return "Falta el título del evento."
++
++        val startAt = ToolDateParsing.parseDateTime(args["startAt"] as? String)
++            ?: return "No he podido entender la fecha de inicio del evento."
++
++        val endAt = ToolDateParsing.parseDateTime(args["endAt"] as? String)
++
++        return try {
++            val event = calendarService.createEvent(
++                userId = ApacheDefaults.DEFAULT_USER_ID,
++                title = title,
++                description = (args["description"] as? String)?.trim(),
++                startAt = startAt,
++                endAt = endAt,
++                location = (args["location"] as? String)?.trim()
++            )
++
++            "Evento creado: ${event.describe()}"
++        } catch (e: IllegalArgumentException) {
++            "No se ha podido crear el evento: ${e.message}"
++        }
++    }
++}
++
++/** Tool de solo lectura que consulta los eventos del calendario en un rango de fechas. */
++@Component
++class GetCalendarEventsTool(
++    private val calendarService: CalendarService
++) : Tool {
++
++    override val name = "getCalendarEvents"
++
++    override val description =
++        "Consulta los eventos del calendario del usuario entre dos fechas. Si no se especifica " +
++            "ningún rango, se asume desde hoy hasta dentro de 7 días. Útil para preguntas como " +
++            "'¿qué tengo hoy?', '¿qué planes tengo esta semana?' o '¿tengo algo el viernes?'."
++
++    override val riskLevel = RiskLevel.READ_ONLY
++
++    override val parametersSchema: Map<String, Any?> = mapOf(
++        "type" to "object",
++        "properties" to mapOf(
++            "from" to mapOf(
++                "type" to "string",
++                "description" to "Fecha de inicio del rango, formato 'yyyy-MM-dd'. Opcional, por defecto hoy."
++            ),
++            "to" to mapOf(
++                "type" to "string",
++                "description" to "Fecha de fin del rango, formato 'yyyy-MM-dd'. Opcional, por defecto 7 días después de 'from'."
++            )
++        )
++    )
++
++    override fun execute(args: Map<String, Any?>): String {
++
++        val from = ToolDateParsing.parseDateTime(args["from"] as? String)
++            ?: LocalDate.now().atStartOfDay()
++
++        val to = ToolDateParsing.parseDateTime(args["to"] as? String)
++            ?: from.plusDays(7).toLocalDate().atTime(23, 59, 59)
++
++        val events = try {
++            calendarService.getEvents(ApacheDefaults.DEFAULT_USER_ID, from, to)
++        } catch (e: IllegalArgumentException) {
++            return "No se han podido consultar los eventos: ${e.message}"
++        }
++
++        if (events.isEmpty()) {
++            return "No hay eventos programados en ese rango de fechas."
++        }
++
++        return events.joinToString("\n") { it.describe() }
++    }
++}
++
++/** Tool que modifica un evento existente. Solo cambia los campos que se indiquen. */
++@Component
++class UpdateCalendarEventTool(
++    private val calendarService: CalendarService
++) : Tool {
++
++    override val name = "updateCalendarEvent"
++
++    override val description =
++        "Modifica un evento de calendario ya existente (título, fecha, hora, lugar o descripción). " +
++            "Necesita el id del evento, que se obtiene primero con getCalendarEvents."
++
++    override val riskLevel = RiskLevel.REVERSIBLE
++
++    override val parametersSchema: Map<String, Any?> = mapOf(
++        "type" to "object",
++        "properties" to mapOf(
++            "eventId" to mapOf("type" to "integer", "description" to "Id del evento a modificar."),
++            "title" to mapOf("type" to "string", "description" to "Nuevo título. Opcional."),
++            "startAt" to mapOf("type" to "string", "description" to "Nueva fecha/hora de inicio, formato ISO. Opcional."),
++            "endAt" to mapOf("type" to "string", "description" to "Nueva fecha/hora de fin, formato ISO. Opcional."),
++            "description" to mapOf("type" to "string", "description" to "Nueva descripción. Opcional."),
++            "location" to mapOf("type" to "string", "description" to "Nuevo lugar. Opcional.")
++        ),
++        "required" to listOf("eventId")
++    )
++
++    override fun execute(args: Map<String, Any?>): String {
++        val eventId = (args["eventId"] as? Number)?.toLong()
++            ?: (args["eventId"] as? String)?.toLongOrNull()
++            ?: return "Falta el id del evento a modificar."
++
++        return try {
++            val updated = calendarService.updateEvent(
++                eventId = eventId,
++                title = (args["title"] as? String)?.trim(),
++                description = (args["description"] as? String)?.trim(),
++                startAt = ToolDateParsing.parseDateTime(args["startAt"] as? String),
++                endAt = ToolDateParsing.parseDateTime(args["endAt"] as? String),
++                location = (args["location"] as? String)?.trim()
++            )
++
++            if (updated) "Evento #$eventId actualizado." else "No se ha podido actualizar el evento #$eventId."
++        } catch (e: IllegalArgumentException) {
++            "No se ha podido actualizar el evento: ${e.message}"
++        }
++    }
++}
++
++/** Tool que cancela (borrado lógico) un evento de calendario. */
++@Component
++class DeleteCalendarEventTool(
++    private val calendarService: CalendarService
++) : Tool {
++
++    override val name = "deleteCalendarEvent"
++
++    override val description =
++        "Elimina (cancela) un evento del calendario del usuario. Necesita el id del evento, " +
++            "que se obtiene primero con getCalendarEvents."
++
++    override val riskLevel = RiskLevel.RECOVERABLE
++
++    override val parametersSchema: Map<String, Any?> = mapOf(
++        "type" to "object",
++        "properties" to mapOf(
++            "eventId" to mapOf("type" to "integer", "description" to "Id del evento a eliminar.")
++        ),
++        "required" to listOf("eventId")
++    )
++
++    override fun execute(args: Map<String, Any?>): String {
++        val eventId = (args["eventId"] as? Number)?.toLong()
++            ?: (args["eventId"] as? String)?.toLongOrNull()
++            ?: return "Falta el id del evento a eliminar."
++
++        val deleted = calendarService.deleteEvent(eventId)
++
++        return if (deleted) "Evento #$eventId eliminado." else "No se ha encontrado el evento #$eventId."
++    }
++}
+diff --git a/core/src/main/kotlin/com/apache/tools/NotificationTools.kt b/core/src/main/kotlin/com/apache/tools/NotificationTools.kt
+new file mode 100644
+index 0000000..c961345
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/tools/NotificationTools.kt
+@@ -0,0 +1,38 @@
++package com.apache.tools
++
++import com.apache.ApacheDefaults
++import com.apache.database.service.NotificationService
++import org.springframework.stereotype.Component
++
++/** Tool de solo lectura que consulta las notificaciones sin leer del usuario. */
++@Component
++class ListNotificationsTool(
++    private val notificationService: NotificationService
++) : Tool {
++
++    override val name = "listNotifications"
++
++    override val description =
++        "Consulta las notificaciones pendientes de leer del usuario (por ejemplo, recordatorios " +
++            "que ya se han disparado). Útil si el usuario pregunta '¿tengo notificaciones?' o '¿algo pendiente?'."
++
++    override val riskLevel = RiskLevel.READ_ONLY
++
++    override val parametersSchema: Map<String, Any?> = mapOf(
++        "type" to "object",
++        "properties" to emptyMap<String, Any?>()
++    )
++
++    override fun execute(args: Map<String, Any?>): String {
++        val notifications = notificationService.listNotifications(
++            ApacheDefaults.DEFAULT_USER_ID,
++            onlyUnread = true
++        )
++
++        if (notifications.isEmpty()) {
++            return "No hay notificaciones pendientes."
++        }
++
++        return notifications.joinToString("\n") { "#${it.id} · ${it.title}: ${it.message}" }
++    }
++}
+diff --git a/core/src/main/kotlin/com/apache/tools/ReminderTools.kt b/core/src/main/kotlin/com/apache/tools/ReminderTools.kt
+new file mode 100644
+index 0000000..cddc50f
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/tools/ReminderTools.kt
+@@ -0,0 +1,121 @@
++package com.apache.tools
++
++import com.apache.ApacheDefaults
++import com.apache.database.repository.ReminderRecord
++import com.apache.database.service.ReminderService
++import org.springframework.stereotype.Component
++
++private fun ReminderRecord.describe(): String =
++    "#$id · $title · ${ToolDateParsing.formatForUser(triggerAt)}"
++
++/** Tool que crea un recordatorio nuevo para el usuario. */
++@Component
++class CreateReminderTool(
++    private val reminderService: ReminderService
++) : Tool {
++
++    override val name = "createReminder"
++
++    override val description =
++        "Crea un recordatorio para que Apache avise al usuario en un momento futuro concreto. " +
++            "Úsalo cuando el usuario pida que le recuerdes algo a una hora determinada."
++
++    override val riskLevel = RiskLevel.REVERSIBLE
++
++    override val parametersSchema: Map<String, Any?> = mapOf(
++        "type" to "object",
++        "properties" to mapOf(
++            "title" to mapOf("type" to "string", "description" to "Qué hay que recordar."),
++            "message" to mapOf(
++                "type" to "string",
++                "description" to "Texto exacto del aviso. Opcional; si no se indica, se usa el título."
++            ),
++            "triggerAt" to mapOf(
++                "type" to "string",
++                "description" to "Fecha y hora en que debe saltar el recordatorio, formato ISO 'yyyy-MM-ddTHH:mm'. Debe ser futura."
++            )
++        ),
++        "required" to listOf("title", "triggerAt")
++    )
++
++    override fun execute(args: Map<String, Any?>): String {
++        val title = (args["title"] as? String)?.trim()
++            ?: return "Falta el título del recordatorio."
++
++        val triggerAt = ToolDateParsing.parseDateTime(args["triggerAt"] as? String)
++            ?: return "No he podido entender la fecha y hora del recordatorio."
++
++        return try {
++            val reminder = reminderService.createReminder(
++                userId = ApacheDefaults.DEFAULT_USER_ID,
++                title = title,
++                message = (args["message"] as? String)?.trim(),
++                triggerAt = triggerAt
++            )
++
++            "Recordatorio creado: ${reminder.describe()}"
++        } catch (e: IllegalArgumentException) {
++            "No se ha podido crear el recordatorio: ${e.message}"
++        }
++    }
++}
++
++/** Tool de solo lectura que lista los recordatorios pendientes del usuario. */
++@Component
++class ListRemindersTool(
++    private val reminderService: ReminderService
++) : Tool {
++
++    override val name = "listReminders"
++
++    override val description = "Lista los recordatorios pendientes (todavía no disparados) del usuario."
++
++    override val riskLevel = RiskLevel.READ_ONLY
++
++    override val parametersSchema: Map<String, Any?> = mapOf(
++        "type" to "object",
++        "properties" to emptyMap<String, Any?>()
++    )
++
++    override fun execute(args: Map<String, Any?>): String {
++        val reminders = reminderService.listReminders(ApacheDefaults.DEFAULT_USER_ID)
++
++        if (reminders.isEmpty()) {
++            return "No hay recordatorios pendientes."
++        }
++
++        return reminders.joinToString("\n") { it.describe() }
++    }
++}
++
++/** Tool que cancela un recordatorio antes de que se dispare. */
++@Component
++class CancelReminderTool(
++    private val reminderService: ReminderService
++) : Tool {
++
++    override val name = "cancelReminder"
++
++    override val description =
++        "Cancela un recordatorio pendiente. Necesita el id, que se obtiene primero con listReminders."
++
++    override val riskLevel = RiskLevel.RECOVERABLE
++
++    override val parametersSchema: Map<String, Any?> = mapOf(
++        "type" to "object",
++        "properties" to mapOf(
++            "reminderId" to mapOf("type" to "integer", "description" to "Id del recordatorio a cancelar.")
++        ),
++        "required" to listOf("reminderId")
++    )
++
++    override fun execute(args: Map<String, Any?>): String {
++        val reminderId = (args["reminderId"] as? Number)?.toLong()
++            ?: (args["reminderId"] as? String)?.toLongOrNull()
++            ?: return "Falta el id del recordatorio a cancelar."
++
++        val cancelled = reminderService.cancelReminder(reminderId)
++
++        return if (cancelled) "Recordatorio #$reminderId cancelado." else "No se ha encontrado el recordatorio #$reminderId."
++    }
++}
+diff --git a/core/src/main/kotlin/com/apache/tools/TaskTools.kt b/core/src/main/kotlin/com/apache/tools/TaskTools.kt
+new file mode 100644
+index 0000000..4debb54
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/tools/TaskTools.kt
+@@ -0,0 +1,216 @@
++package com.apache.tools
++
++import com.apache.ApacheDefaults
++import com.apache.database.repository.TaskRecord
++import com.apache.database.service.TaskService
++import org.springframework.stereotype.Component
++
++private fun TaskRecord.describe(): String {
++    val duePart = dueAt?.let { " · vence ${ToolDateParsing.formatForUser(it)}" } ?: ""
++    val statusMark = if (status == "completed") "[hecha] " else ""
++
++    return "#$id · $statusMark$title · prioridad: $priority$duePart"
++}
++
++/** Tool que crea una tarea nueva para el usuario. */
++@Component
++class CreateTaskTool(
++    private val taskService: TaskService
++) : Tool {
++
++    override val name = "createTask"
++
++    override val description =
++        "Crea una tarea pendiente para el usuario. A diferencia de un evento de calendario, " +
++            "una tarea no ocupa un periodo de tiempo concreto: es algo que hay que hacer, " +
++            "opcionalmente con una fecha límite y una prioridad."
++
++    override val riskLevel = RiskLevel.REVERSIBLE
++
++    override val parametersSchema: Map<String, Any?> = mapOf(
++        "type" to "object",
++        "properties" to mapOf(
++            "title" to mapOf("type" to "string", "description" to "Título de la tarea."),
++            "description" to mapOf("type" to "string", "description" to "Detalles adicionales. Opcional."),
++            "priority" to mapOf(
++                "type" to "string",
++                "description" to "Prioridad: 'low', 'medium' o 'high'. Opcional, por defecto 'medium'."
++            ),
++            "dueAt" to mapOf(
++                "type" to "string",
++                "description" to "Fecha límite, formato 'yyyy-MM-dd' o 'yyyy-MM-ddTHH:mm'. Opcional."
++            )
++        ),
++        "required" to listOf("title")
++    )
++
++    override fun execute(args: Map<String, Any?>): String {
++        val title = (args["title"] as? String)?.trim()
++            ?: return "Falta el título de la tarea."
++
++        return try {
++            val task = taskService.createTask(
++                userId = ApacheDefaults.DEFAULT_USER_ID,
++                title = title,
++                description = (args["description"] as? String)?.trim(),
++                priority = args["priority"] as? String,
++                dueAt = ToolDateParsing.parseDateTime(args["dueAt"] as? String)
++            )
++
++            "Tarea creada: ${task.describe()}"
++        } catch (e: IllegalArgumentException) {
++            "No se ha podido crear la tarea: ${e.message}"
++        }
++    }
++}
++
++/** Tool de solo lectura que lista las tareas del usuario. */
++@Component
++class ListTasksTool(
++    private val taskService: TaskService
++) : Tool {
++
++    override val name = "listTasks"
++
++    override val description =
++        "Lista las tareas pendientes del usuario. Si el usuario pide ver también las ya " +
++            "completadas, pasa includeCompleted=true."
++
++    override val riskLevel = RiskLevel.READ_ONLY
++
++    override val parametersSchema: Map<String, Any?> = mapOf(
++        "type" to "object",
++        "properties" to mapOf(
++            "includeCompleted" to mapOf(
++                "type" to "boolean",
++                "description" to "Si es true, incluye también las tareas ya completadas. Por defecto false."
++            )
++        )
++    )
++
++    override fun execute(args: Map<String, Any?>): String {
++        val includeCompleted = (args["includeCompleted"] as? Boolean) ?: false
++
++        val tasks = taskService.listTasks(ApacheDefaults.DEFAULT_USER_ID, includeCompleted)
++
++        if (tasks.isEmpty()) {
++            return if (includeCompleted) "No hay tareas." else "No hay tareas pendientes."
++        }
++
++        return tasks.joinToString("\n") { it.describe() }
++    }
++}
++
++/** Tool que marca una tarea como completada. */
++@Component
++class CompleteTaskTool(
++    private val taskService: TaskService
++) : Tool {
++
++    override val name = "completeTask"
++
++    override val description =
++        "Marca una tarea como completada. Necesita el id de la tarea, que se obtiene primero con listTasks."
++
++    override val riskLevel = RiskLevel.REVERSIBLE
++
++    override val parametersSchema: Map<String, Any?> = mapOf(
++        "type" to "object",
++        "properties" to mapOf(
++            "taskId" to mapOf("type" to "integer", "description" to "Id de la tarea a completar.")
++        ),
++        "required" to listOf("taskId")
++    )
++
++    override fun execute(args: Map<String, Any?>): String {
++        val taskId = (args["taskId"] as? Number)?.toLong()
++            ?: (args["taskId"] as? String)?.toLongOrNull()
++            ?: return "Falta el id de la tarea."
++
++        return try {
++            val completed = taskService.completeTask(taskId)
++            if (completed) "Tarea #$taskId marcada como completada." else "No se ha podido completar la tarea #$taskId."
++        } catch (e: IllegalArgumentException) {
++            "No se ha podido completar la tarea: ${e.message}"
++        }
++    }
++}
++
++/** Tool que modifica una tarea existente. Solo cambia los campos que se indiquen. */
++@Component
++class UpdateTaskTool(
++    private val taskService: TaskService
++) : Tool {
++
++    override val name = "updateTask"
++
++    override val description =
++        "Modifica una tarea existente (título, descripción, prioridad o fecha límite). " +
++            "Necesita el id de la tarea, que se obtiene primero con listTasks."
++
++    override val riskLevel = RiskLevel.REVERSIBLE
++
++    override val parametersSchema: Map<String, Any?> = mapOf(
++        "type" to "object",
++        "properties" to mapOf(
++            "taskId" to mapOf("type" to "integer", "description" to "Id de la tarea a modificar."),
++            "title" to mapOf("type" to "string", "description" to "Nuevo título. Opcional."),
++            "description" to mapOf("type" to "string", "description" to "Nueva descripción. Opcional."),
++            "priority" to mapOf("type" to "string", "description" to "Nueva prioridad: 'low', 'medium' o 'high'. Opcional."),
++            "dueAt" to mapOf("type" to "string", "description" to "Nueva fecha límite. Opcional.")
++        ),
++        "required" to listOf("taskId")
++    )
++
++    override fun execute(args: Map<String, Any?>): String {
++        val taskId = (args["taskId"] as? Number)?.toLong()
++            ?: (args["taskId"] as? String)?.toLongOrNull()
++            ?: return "Falta el id de la tarea a modificar."
++
++        return try {
++            val updated = taskService.updateTask(
++                taskId = taskId,
++                title = (args["title"] as? String)?.trim(),
++                description = (args["description"] as? String)?.trim(),
++                priority = args["priority"] as? String,
++                dueAt = ToolDateParsing.parseDateTime(args["dueAt"] as? String)
++            )
++
++            if (updated) "Tarea #$taskId actualizada." else "No se ha podido actualizar la tarea #$taskId."
++        } catch (e: IllegalArgumentException) {
++            "No se ha podido actualizar la tarea: ${e.message}"
++        }
++    }
++}
++
++/** Tool que elimina una tarea. */
++@Component
++class DeleteTaskTool(
++    private val taskService: TaskService
++) : Tool {
++
++    override val name = "deleteTask"
++
++    override val description =
++        "Elimina definitivamente una tarea. Necesita el id de la tarea, que se obtiene primero con listTasks."
++
++    override val riskLevel = RiskLevel.RECOVERABLE
++
++    override val parametersSchema: Map<String, Any?> = mapOf(
++        "type" to "object",
++        "properties" to mapOf(
++            "taskId" to mapOf("type" to "integer", "description" to "Id de la tarea a eliminar.")
++        ),
++        "required" to listOf("taskId")
++    )
++
++    override fun execute(args: Map<String, Any?>): String {
++        val taskId = (args["taskId"] as? Number)?.toLong()
++            ?: (args["taskId"] as? String)?.toLongOrNull()
++            ?: return "Falta el id de la tarea a eliminar."
++
++        val deleted = taskService.deleteTask(taskId)
++
++        return if (deleted) "Tarea #$taskId eliminada." else "No se ha encontrado la tarea #$taskId."
++    }
++}
+diff --git a/core/src/main/kotlin/com/apache/tools/ToolDateParsing.kt b/core/src/main/kotlin/com/apache/tools/ToolDateParsing.kt
+new file mode 100644
+index 0000000..4fb13b4
+--- /dev/null
++++ b/core/src/main/kotlin/com/apache/tools/ToolDateParsing.kt
+@@ -0,0 +1,40 @@
++package com.apache.tools
++
++import java.time.LocalDate
++import java.time.LocalDateTime
++import java.time.format.DateTimeFormatter
++
++/**
++ * Parseo de fechas/horas tolerante, compartido por las tools de calendario,
++ * tareas y recordatorios.
++ *
++ * Gemini nos manda las fechas como texto libre dentro del JSON de argumentos
++ * (nunca un tipo fecha real), así que aceptamos las dos formas más
++ * habituales que le pedimos en la descripción de cada parámetro:
++ *  - "2026-09-15T18:30"  (fecha y hora, formato ISO)
++ *  - "2026-09-15"        (solo fecha; se asume medianoche)
++ */
++object ToolDateParsing {
++
++    private val dateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME
++    private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
++
++    /** Devuelve null si [value] es null, vacío, o no se puede interpretar como fecha. */
++    fun parseDateTime(value: String?): LocalDateTime? {
++        val trimmed = value?.trim()
++        if (trimmed.isNullOrEmpty()) return null
++
++        return try {
++            LocalDateTime.parse(trimmed, dateTimeFormatter)
++        } catch (e: Exception) {
++            try {
++                LocalDate.parse(trimmed, dateFormatter).atStartOfDay()
++            } catch (e2: Exception) {
++                null
++            }
++        }
++    }
++
++    fun formatForUser(value: LocalDateTime): String =
++        value.format(DateTimeFormatter.ofPattern("EEEE d 'de' MMMM, HH:mm"))
++}

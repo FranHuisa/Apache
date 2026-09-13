@@ -220,7 +220,7 @@ class GeminiClient(
                                 "tools" to
                                         listOf(
                                                 mapOf(
-                                                        "function_declarations" to
+                                                        "functionDeclarations" to
                                                                 toolRegistry
                                                                         .toGeminiFunctionDeclarations()
                                                 )
@@ -275,7 +275,9 @@ class GeminiClient(
                                         textResponse = part["text"].asText()
                                 }
                         }
-
+                        println("GEMINI RESPONSE PARTS: $parts")
+                        println("GEMINI FUNCTION CALLS: $functionCalls")
+                        println("GEMINI TEXT RESPONSE: $textResponse")
                         return when {
                                 functionCalls.isNotEmpty() ->
                                         GeminiResult.FunctionCalls(functionCalls)

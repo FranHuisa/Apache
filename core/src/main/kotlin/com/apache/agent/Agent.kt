@@ -69,13 +69,9 @@ class Agent(
     /**
      * Apache 0.1 utiliza inicialmente el usuario `default`.
      *
-     * Este usuario se creó durante la configuración inicial de MySQL
-     * y actualmente corresponde al id 1.
-     *
-     * Más adelante este valor dejará de estar fijado cuando Apache
-     * tenga gestión de usuarios y sesiones.
+     * Ver [com.apache.ApacheDefaults.DEFAULT_USER_ID].
      */
-    private val defaultUserId = 1L
+    private val defaultUserId = com.apache.ApacheDefaults.DEFAULT_USER_ID
 
     fun handleMessage(
         conversationId: Long?,

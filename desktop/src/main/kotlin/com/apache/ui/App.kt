@@ -25,6 +25,9 @@ import com.apache.audio.MicrophoneRecorder
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import java.util.Base64
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -34,7 +37,7 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-
+import com.apache.notifications.WindowsNotificationManager
 // Representa un mensaje que aparece en el chat.
 data class ChatMessage(val text: String, val isUser: Boolean)
 
@@ -123,6 +126,124 @@ private object SessionStore {
             }
         } catch (e: Exception) {}
     }
+}
+// DTO de una notificación tal como la devuelve el Core (ver NotificationController).
+data class NotificationDto(
+        val id: Long,
+        val type: String,
+        val title: String,
+        val message: String,
+        val read: Boolean,
+        val createdAt: String
+)
+
+data class CalendarEventDto(
+        val id: Long,
+        val title: String,
+        val description: String? = null,
+        val startAt: String,
+        val endAt: String? = null,
+        val location: String? = null,
+        val allDay: Boolean = false,
+        val status: String
+)
+
+data class CreateCalendarEventDto(
+        val title: String,
+        val startAt: String,
+        val description: String? = null,
+        val endAt: String? = null,
+        val location: String? = null,
+        val allDay: Boolean = false
+)
+
+private fun fetchCalendarEvents(): List<CalendarEventDto> {
+    val request =
+            Request.Builder()
+                    .url("http://localhost:8080/api/calendar/events")
+                    .get()
+                    .build()
+
+    httpClient.newCall(request).execute().use { response ->
+        val bodyText = response.body?.string().orEmpty()
+        if (!response.isSuccessful) throw RuntimeException("Error del Core: ${response.code}")
+        return objectMapper.readValue(bodyText)
+    }
+}
+
+private fun createCalendarEvent(event: CreateCalendarEventDto): CalendarEventDto {
+    val request =
+            Request.Builder()
+                    .url("http://localhost:8080/api/calendar/events")
+                    .post(objectMapper.writeValueAsString(event).toRequestBody(jsonMediaType))
+                    .build()
+
+    httpClient.newCall(request).execute().use { response ->
+        val bodyText = response.body?.string().orEmpty()
+        if (!response.isSuccessful) throw RuntimeException("No se ha podido crear el evento.")
+        return objectMapper.readValue(bodyText)
+    }
+}
+
+private fun calendarDateTime(): String =
+        LocalDateTime.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
+                .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+
+private fun calendarDate(): String =
+        LocalDateTime.now().plusHours(1).format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
+
+private fun calendarTime(): String =
+        LocalDateTime.now().plusHours(1).withMinute(0).format(DateTimeFormatter.ofPattern("HH:mm"))
+
+private fun calendarStartAt(date: String, time: String): String =
+        LocalDateTime.parse(
+                        "${date.trim()} ${time.trim()}",
+                        DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm")
+                )
+                .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+
+@Composable
+private fun calendarTextFieldColors() =
+        OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedBorderColor = Color(0xFF1DB954),
+                unfocusedBorderColor = Color(0xFF4A5A50),
+                focusedLabelColor = Color(0xFF6FE19A),
+                unfocusedLabelColor = Color(0xFFB7C2BB),
+                cursorColor = Color(0xFF1DB954)
+        )
+
+/** Consulta al Core las notificaciones sin leer del usuario. */
+private fun fetchUnreadNotifications(): List<NotificationDto> {
+    val request =
+            Request.Builder()
+                    .url("http://localhost:8080/api/notifications?onlyUnread=true")
+                    .get()
+                    .build()
+
+    httpClient.newCall(request).execute().use { response ->
+        val bodyText = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw RuntimeException("Error del Core: ${response.code}")
+        }
+
+        return objectMapper.readValue(bodyText)
+    }
+}
+
+/**
+ * Marca una notificación como leída en el Core, para que deje de aparecer en el siguiente polling.
+ */
+private fun markNotificationRead(id: Long) {
+    val request =
+            Request.Builder()
+                    .url("http://localhost:8080/api/notifications/$id/read")
+                    .post("".toRequestBody(jsonMediaType))
+                    .build()
+
+    httpClient.newCall(request).execute().close()
 }
 /**
  * Envía un mensaje al Apache Core.
@@ -288,11 +409,120 @@ fun App() {
     // Indica si debemos mostrar "Pensando..." mientras esperamos la respuesta del Core.
     var showThinking by remember { mutableStateOf(false) }
 
+    // -----------------------------------------------------------------
+    // Notificaciones (recordatorios disparados, avisos del sistema...).
+    //
+    // El Desktop hace polling periódico al Core en vez de mantener una
+    // conexión persistente (websocket, SSE...): para un asistente personal
+    // de un único usuario es más que suficiente y muchísimo más simple.
+    // -----------------------------------------------------------------
+    var pendingNotifications by remember { mutableStateOf<List<NotificationDto>>(emptyList()) }
+
+    fun dismissNotification(id: Long) {
+        pendingNotifications = pendingNotifications.filter { it.id != id }
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                markNotificationRead(id)
+            } catch (e: Exception) {
+                // Si falla la llamada de "marcar como leída" no pasa nada grave:
+                // en el próximo polling puede volver a aparecer, pero no rompemos la UI por esto.
+            }
+        }
+    }
+
+LaunchedEffect(Unit) {
+    val shownNotifications = mutableSetOf<Long>()
+
+    while (true) {
+        try {
+            val notifications = fetchUnreadNotifications()
+
+            notifications
+                .filter { it.id !in shownNotifications }
+                .forEach { notification ->
+                    println("NOTIFICACIÓN WINDOWS: ${notification.title}")
+                    WindowsNotificationManager.show(
+                        notification.title,
+                        notification.message
+                    )
+
+                    shownNotifications.add(notification.id)
+                }
+
+            pendingNotifications = notifications
+        } catch (e: Exception) {
+            // El Core puede no estar arrancado todavía, o haberse caído: lo
+            // ignoramos y lo volvemos a intentar en el siguiente ciclo.
+        }
+
+        delay(15_000)
+    }
+}
     // Controla qué sección de la interfaz está seleccionada.
     var selectedSection by remember { mutableStateOf("Chat") }
 
+    var calendarEvents by remember { mutableStateOf<List<CalendarEventDto>>(emptyList()) }
+    var calendarLoading by remember { mutableStateOf(false) }
+    var calendarError by remember { mutableStateOf<String?>(null) }
+    var calendarTitle by remember { mutableStateOf("") }
+    var calendarDate by remember { mutableStateOf(calendarDate()) }
+    var calendarTime by remember { mutableStateOf(calendarTime()) }
+    var calendarLocation by remember { mutableStateOf("") }
+
     // Coroutine scope utilizado para ejecutar la petición sin bloquear la interfaz gráfica.
     val scope = rememberCoroutineScope()
+
+    fun loadCalendar() {
+        scope.launch {
+            calendarLoading = true
+            calendarError = null
+            try {
+                calendarEvents = withContext(Dispatchers.IO) { fetchCalendarEvents() }
+            } catch (_: Exception) {
+                calendarError = "No se ha podido conectar con el Core. Arráncalo y vuelve a intentarlo."
+            } finally {
+                calendarLoading = false
+            }
+        }
+    }
+
+    fun saveCalendarEvent() {
+        if (calendarTitle.isBlank()) {
+            calendarError = "Escribe un título para el evento."
+            return
+        }
+
+        scope.launch {
+            calendarLoading = true
+            calendarError = null
+            try {
+                val created =
+                        withContext(Dispatchers.IO) {
+                            createCalendarEvent(
+                                    CreateCalendarEventDto(
+                                            title = calendarTitle.trim(),
+                                            startAt = calendarStartAt(calendarDate, calendarTime),
+                                            location = calendarLocation.trim().ifBlank { null }
+                                    )
+                            )
+                        }
+                calendarEvents = (calendarEvents + created).sortedBy { it.startAt }
+                calendarTitle = ""
+                calendarLocation = ""
+                calendarDate = calendarDate()
+                calendarTime = calendarTime()
+            } catch (_: Exception) {
+                calendarError = "Revisa la fecha y la hora, y confirma que el Core está iniciado."
+            } finally {
+                calendarLoading = false
+            }
+        }
+    }
+
+    LaunchedEffect(selectedSection) {
+        if (selectedSection == "Calendario") loadCalendar()
+    }
 
     // Controla la posición del scroll de la conversación.
     val chatListState = rememberLazyListState()
@@ -633,495 +863,689 @@ fun App() {
         }
     }
 
+    /** Dibuja una burbuja de mensaje, alineada según su remitente. */
+    @Composable
+    fun MessageBubble(message: ChatMessage) {
+        Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start
+        ) {
+            Surface(
+                    color = if (message.isUser) Color(0xFF1DB954) else Color(0xFF242424),
+                    shape = RoundedCornerShape(12.dp)
+            ) {
+                SelectionContainer {
+                    Text(
+                            text = message.text,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            color = if (message.isUser) Color.Black else Color.White,
+                            fontSize = 15.sp
+                    )
+                }
+            }
+        }
+    }
+
     MaterialTheme {
 
         // Fondo principal de la aplicación.
         Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF121212)) {
 
             // Layout principal: barra lateral + contenido.
-            Row(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    // =========================================================
+                    // BARRA LATERAL
+                    // =========================================================
 
-                // =========================================================
-                // BARRA LATERAL
-                // =========================================================
+                    Column(
+                            modifier =
+                                    Modifier.width(220.dp)
+                                            .fillMaxHeight()
+                                            .background(Color(0xFF181818))
+                                            .padding(20.dp)
+                    ) {
 
-                Column(
-                        modifier =
-                                Modifier.width(220.dp)
-                                        .fillMaxHeight()
-                                        .background(Color(0xFF181818))
-                                        .padding(20.dp)
-                ) {
+                        // Nombre de Apache.
+                        Text(text = "APACHE", color = Color(0xFF1DB954), fontSize = 24.sp)
 
-                    // Nombre de Apache.
-                    Text(text = "APACHE", color = Color(0xFF1DB954), fontSize = 24.sp)
+                        Spacer(modifier = Modifier.height(30.dp))
 
-                    Spacer(modifier = Modifier.height(30.dp))
+                        // Sección Chat.
+                        Text(
+                                text = "Chat",
+                                color =
+                                        if (selectedSection == "Chat") {
+                                            Color.White
+                                        } else {
+                                            Color(0xFFAAAAAA)
+                                        },
+                                fontSize = 16.sp,
+                                modifier = Modifier.clickable { selectedSection = "Chat" }
+                        )
 
-                    // Sección Chat.
-                    Text(
-                            text = "Chat",
-                            color =
-                                    if (selectedSection == "Chat") {
-                                        Color.White
-                                    } else {
-                                        Color(0xFFAAAAAA)
-                                    },
-                            fontSize = 16.sp,
-                            modifier = Modifier.clickable { selectedSection = "Chat" }
-                    )
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                                text = "Calendario",
+                                color =
+                                        if (selectedSection == "Calendario") {
+                                            Color.White
+                                        } else {
+                                            Color(0xFFAAAAAA)
+                                        },
+                                fontSize = 16.sp,
+                                modifier = Modifier.clickable { selectedSection = "Calendario" }
+                        )
 
-                    // Sección Memoria.
-                    Text(
-                            text = "Memoria",
-                            color =
-                                    if (selectedSection == "Memoria") {
-                                        Color.White
-                                    } else {
-                                        Color(0xFFAAAAAA)
-                                    },
-                            fontSize = 16.sp,
-                            modifier = Modifier.clickable { selectedSection = "Memoria" }
-                    )
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                        // Sección Memoria.
+                        Text(
+                                text = "Memoria",
+                                color =
+                                        if (selectedSection == "Memoria") {
+                                            Color.White
+                                        } else {
+                                            Color(0xFFAAAAAA)
+                                        },
+                                fontSize = 16.sp,
+                                modifier = Modifier.clickable { selectedSection = "Memoria" }
+                        )
 
-                    // Sección Ayuda.
-                    Text(
-                            text = "Ayuda",
-                            color =
-                                    if (selectedSection == "Ayuda") {
-                                        Color.White
-                                    } else {
-                                        Color(0xFFAAAAAA)
-                                    },
-                            fontSize = 16.sp,
-                            modifier = Modifier.clickable { selectedSection = "Ayuda" }
-                    )
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                    // Empuja la versión hacia la parte inferior.
-                    Spacer(modifier = Modifier.weight(1f))
+                        // Sección Ayuda.
+                        Text(
+                                text = "Ayuda",
+                                color =
+                                        if (selectedSection == "Ayuda") {
+                                            Color.White
+                                        } else {
+                                            Color(0xFFAAAAAA)
+                                        },
+                                fontSize = 16.sp,
+                                modifier = Modifier.clickable { selectedSection = "Ayuda" }
+                        )
 
-                    // Versión actual de Apache.
-                    Text(text = "Apache 0.1.0", color = Color(0xFF666666), fontSize = 12.sp)
-                }
+                        // Empuja la versión hacia la parte inferior.
+                        Spacer(modifier = Modifier.weight(1f))
 
-                // =========================================================
-                // CONTENIDO PRINCIPAL
-                // =========================================================
+                        // Versión actual de Apache.
+                        Text(text = "Apache 0.1.0", color = Color(0xFF666666), fontSize = 12.sp)
+                    }
 
-                when (selectedSection) {
+                    // =========================================================
+                    // CONTENIDO PRINCIPAL
+                    // =========================================================
 
-                    // =====================================================
-                    // CHAT
-                    // =====================================================
+                    when (selectedSection) {
 
-                    "Chat" -> {
+                        // =====================================================
+                        // CHAT
+                        // =====================================================
 
-                        // Zona principal del chat.
-                        Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+                        "Chat" -> {
 
-                            // Título.
-                            Text(text = "Asistente", color = Color.White, fontSize = 22.sp)
+                            // Zona principal del chat.
+                            Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
 
-                            Spacer(modifier = Modifier.height(20.dp))
+                                // Título.
+                                Text(text = "Asistente", color = Color.White, fontSize = 22.sp)
 
-                            // =====================================================
-                            // CONVERSACIÓN
-                            // =====================================================
+                                Spacer(modifier = Modifier.height(20.dp))
 
-                            LazyColumn(
-                                    state = chatListState,
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
+                                // =====================================================
+                                // CONVERSACIÓN
+                                // =====================================================
 
-                                // Dibujamos todos los mensajes.
-                                items(messages) { chatMessage -> MessageBubble(chatMessage) }
+                                LazyColumn(
+                                        state = chatListState,
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
 
-                                // Mientras esperamos al Core mostramos esto.
-                                if (showThinking) {
-                                    item { MessageBubble(ChatMessage("Pensando...", false)) }
+                                    // Dibujamos todos los mensajes.
+                                    items(messages) { chatMessage -> MessageBubble(chatMessage) }
+
+                                    // Mientras esperamos al Core mostramos esto.
+                                    if (showThinking) {
+                                        item { MessageBubble(ChatMessage("Pensando...", false)) }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                if (listenModeEnabled) {
+                                    Surface(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = Color(0xFF173D29),
+                                            shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Text(
+                                                text =
+                                                        "Escucha continua activa · Di «Apache, apaga» para detenerla",
+                                                modifier = Modifier.padding(12.dp),
+                                                color = Color(0xFFA7E8BE),
+                                                fontSize = 14.sp
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                }
+
+                                // =====================================================
+                                // ENTRADA DE MENSAJE
+                                // =====================================================
+
+                                Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                ) {
+
+                                    // Campo donde escribe el usuario.
+                                    OutlinedTextField(
+                                            value = message,
+                                            onValueChange = { message = it },
+                                            modifier = Modifier.weight(1f),
+                                            keyboardOptions =
+                                                    KeyboardOptions(imeAction = ImeAction.Send),
+                                            keyboardActions =
+                                                    KeyboardActions(onSend = { sendMessage() }),
+                                            placeholder = { Text("Escribe un mensaje...") },
+                                            singleLine = true,
+
+                                            // Desactivamos el campo mientras Apache piensa.
+                                            enabled = !isLoading && !isRecording,
+                                            colors =
+                                                    OutlinedTextFieldDefaults.colors(
+                                                            focusedTextColor = Color.White,
+                                                            unfocusedTextColor = Color.White,
+                                                            focusedBorderColor = Color(0xFF1DB954),
+                                                            unfocusedBorderColor =
+                                                                    Color(0xFF444444),
+                                                            cursorColor = Color(0xFF1DB954),
+                                                            focusedPlaceholderColor =
+                                                                    Color(0xFF777777),
+                                                            unfocusedPlaceholderColor =
+                                                                    Color(0xFF777777)
+                                                    )
+                                    )
+
+                                    Spacer(modifier = Modifier.width(10.dp))
+
+                                    // =================================================
+                                    // BOTÓN DE MODO ESCUCHA (wake word)
+                                    // =================================================
+
+                                    Button(
+                                            // Debe seguir disponible mientras Apache responde para
+                                            // poder cortar la escucha en cualquier momento.
+                                            enabled =
+                                                    !isRecording &&
+                                                            (listenModeEnabled || !isLoading),
+                                            onClick = { toggleListenMode() },
+                                            colors =
+                                                    ButtonDefaults.buttonColors(
+                                                            containerColor =
+                                                                    if (listenModeEnabled) {
+                                                                        Color(0xFF9D3030)
+                                                                    } else {
+                                                                        Color(0xFF1DB954)
+                                                                    },
+                                                            contentColor = Color.Black
+                                                    )
+                                    ) {
+                                        Text(
+                                                text =
+                                                        if (listenModeEnabled) {
+                                                            "Detener escucha"
+                                                        } else {
+                                                            "Activar escucha"
+                                                        }
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(10.dp))
+
+                                    // =================================================
+                                    // BOTÓN DE VOZ
+                                    // =================================================
+
+                                    Button(
+                                            enabled = !isLoading && !listenModeEnabled,
+                                            onClick = { toggleRecording() },
+                                            colors =
+                                                    ButtonDefaults.buttonColors(
+                                                            containerColor =
+                                                                    if (isRecording) {
+                                                                        Color(0xFFAA2222)
+                                                                    } else {
+                                                                        Color(0xFF1DB954)
+                                                                    }
+                                                    )
+                                    ) {
+                                        Text(
+                                                text =
+                                                        if (isRecording) {
+                                                            "Detener"
+                                                        } else {
+                                                            "Micrófono"
+                                                        },
+                                                color = Color.Black
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(10.dp))
+
+                                    // =================================================
+                                    // BOTÓN ENVIAR
+                                    // =================================================
+
+                                    Button(
+                                            // Desactivamos el botón mientras esperamos.
+                                            enabled = !isLoading && !isRecording,
+
+                                            // Utilizamos la misma función que Enter.
+                                            onClick = { sendMessage() },
+
+                                            // Color verde de Apache.
+                                            colors =
+                                                    ButtonDefaults.buttonColors(
+                                                            containerColor = Color(0xFF1DB954)
+                                                    )
+                                    ) { Text(text = "Enviar", color = Color.Black) }
                                 }
                             }
+                        }
 
-                            Spacer(modifier = Modifier.height(16.dp))
+                        "Calendario" -> {
+                            Column(
+                                    modifier =
+                                            Modifier.fillMaxSize()
+                                                    .verticalScroll(rememberScrollState())
+                                                    .padding(28.dp)
+                            ) {
+                                Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(text = "Calendario", color = Color.White, fontSize = 26.sp)
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                                text = "Tus próximos 30 días",
+                                                color = Color(0xFF9AA5A0),
+                                                fontSize = 14.sp
+                                        )
+                                    }
+                                    TextButton(onClick = { loadCalendar() }, enabled = !calendarLoading) {
+                                        Text("Actualizar", color = Color(0xFF6FE19A))
+                                    }
+                                }
 
-                            if (listenModeEnabled) {
+                                Spacer(modifier = Modifier.height(24.dp))
+
                                 Surface(
                                         modifier = Modifier.fillMaxWidth(),
-                                        color = Color(0xFF173D29),
-                                        shape = RoundedCornerShape(10.dp)
+                                        color = Color(0xFF1D2923),
+                                        shape = RoundedCornerShape(16.dp)
                                 ) {
-                                    Text(
-                                            text =
-                                                    "Escucha continua activa · Di «Apache, apaga» para detenerla",
-                                            modifier = Modifier.padding(12.dp),
-                                            color = Color(0xFFA7E8BE),
-                                            fontSize = 14.sp
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(10.dp))
-                            }
-
-                            // =====================================================
-                            // ENTRADA DE MENSAJE
-                            // =====================================================
-
-                            Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                            ) {
-
-                                // Campo donde escribe el usuario.
-                                OutlinedTextField(
-                                        value = message,
-                                        onValueChange = { message = it },
-                                        modifier = Modifier.weight(1f),
-                                        keyboardOptions =
-                                                KeyboardOptions(imeAction = ImeAction.Send),
-                                        keyboardActions =
-                                                KeyboardActions(onSend = { sendMessage() }),
-                                        placeholder = { Text("Escribe un mensaje...") },
-                                        singleLine = true,
-
-                                        // Desactivamos el campo mientras Apache piensa.
-                                        enabled = !isLoading && !isRecording,
-                                        colors =
-                                                OutlinedTextFieldDefaults.colors(
-                                                        focusedTextColor = Color.White,
-                                                        unfocusedTextColor = Color.White,
-                                                        focusedBorderColor = Color(0xFF1DB954),
-                                                        unfocusedBorderColor = Color(0xFF444444),
-                                                        cursorColor = Color(0xFF1DB954),
-                                                        focusedPlaceholderColor = Color(0xFF777777),
-                                                        unfocusedPlaceholderColor =
-                                                                Color(0xFF777777)
-                                                )
-                                )
-
-                                Spacer(modifier = Modifier.width(10.dp))
-
-                                // =================================================
-                                // BOTÓN DE MODO ESCUCHA (wake word)
-                                // =================================================
-
-                                Button(
-                                        // Debe seguir disponible mientras Apache responde para
-                                        // poder cortar la escucha en cualquier momento.
-                                        enabled = !isRecording && (listenModeEnabled || !isLoading),
-                                        onClick = { toggleListenMode() },
-                                        colors =
-                                                ButtonDefaults.buttonColors(
-                                                        containerColor =
-                                                                if (listenModeEnabled) {
-                                                                    Color(0xFF9D3030)
-                                                                } else {
-                                                                    Color(0xFF1DB954)
-                                                                },
+                                    Column(modifier = Modifier.padding(20.dp)) {
+                                        Text(text = "Nuevo evento", color = Color.White, fontSize = 18.sp)
+                                        Spacer(modifier = Modifier.height(14.dp))
+                                        OutlinedTextField(
+                                                value = calendarTitle,
+                                                onValueChange = { calendarTitle = it },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                label = { Text("Título") },
+                                                singleLine = true,
+                                                colors = calendarTextFieldColors()
+                                        )
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Row(modifier = Modifier.fillMaxWidth()) {
+                                            OutlinedTextField(
+                                                    value = calendarDate,
+                                                    onValueChange = { calendarDate = it },
+                                                    modifier = Modifier.weight(1f),
+                                                    label = { Text("Fecha") },
+                                                    supportingText = { Text("Ej.: 12/09/2026") },
+                                                    singleLine = true,
+                                                    colors = calendarTextFieldColors()
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            OutlinedTextField(
+                                                    value = calendarTime,
+                                                    onValueChange = { calendarTime = it },
+                                                    modifier = Modifier.width(130.dp),
+                                                    label = { Text("Hora") },
+                                                    supportingText = { Text("Ej.: 18:30") },
+                                                    singleLine = true,
+                                                    colors = calendarTextFieldColors()
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            OutlinedTextField(
+                                                    value = calendarLocation,
+                                                    onValueChange = { calendarLocation = it },
+                                                    modifier = Modifier.weight(1f),
+                                                    label = { Text("Lugar (opcional)") },
+                                                    singleLine = true,
+                                                    colors = calendarTextFieldColors()
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(14.dp))
+                                        Button(
+                                                onClick = { saveCalendarEvent() },
+                                                enabled = !calendarLoading,
+                                                colors = ButtonDefaults.buttonColors(
+                                                        containerColor = Color(0xFF1DB954),
                                                         contentColor = Color.Black
                                                 )
-                                ) {
-                                    Text(
-                                            text =
-                                                    if (listenModeEnabled) {
-                                                        "Detener escucha"
-                                                    } else {
-                                                        "Activar escucha"
+                                        ) { Text("Añadir al calendario") }
+                                    }
+                                }
+
+                                calendarError?.let { error ->
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    Text(text = error, color = Color(0xFFFF9B9B), fontSize = 14.sp)
+                                }
+
+                                Spacer(modifier = Modifier.height(26.dp))
+                                Text(text = "Próximos eventos", color = Color.White, fontSize = 19.sp)
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                if (calendarLoading && calendarEvents.isEmpty()) {
+                                    CircularProgressIndicator(color = Color(0xFF1DB954))
+                                } else if (calendarEvents.isEmpty()) {
+                                    Surface(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = Color(0xFF181F1B),
+                                            shape = RoundedCornerShape(14.dp)
+                                    ) {
+                                        Text(
+                                                text = "No tienes eventos próximos. Crea el primero arriba.",
+                                                modifier = Modifier.padding(20.dp),
+                                                color = Color(0xFFB7C2BB)
+                                        )
+                                    }
+                                } else {
+                                    calendarEvents.forEach { event ->
+                                        Surface(
+                                                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                                                color = Color(0xFF202A24),
+                                                shape = RoundedCornerShape(14.dp)
+                                        ) {
+                                            Row(
+                                                    modifier = Modifier.padding(18.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Surface(
+                                                        color = Color(0xFF1DB954),
+                                                        shape = RoundedCornerShape(10.dp)
+                                                ) {
+                                                    Text(
+                                                            text = event.startAt.replace('T', ' ').take(16),
+                                                            modifier = Modifier.padding(10.dp),
+                                                            color = Color.Black,
+                                                            fontSize = 13.sp
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(14.dp))
+                                                Column {
+                                                    Text(text = event.title, color = Color.White, fontSize = 16.sp)
+                                                    if (!event.location.isNullOrBlank()) {
+                                                        Spacer(modifier = Modifier.height(3.dp))
+                                                        Text(
+                                                                text = event.location,
+                                                                color = Color(0xFFAAC5B1),
+                                                                fontSize = 13.sp
+                                                        )
                                                     }
-                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
+                            }
+                        }
 
-                                Spacer(modifier = Modifier.width(10.dp))
+                        // =====================================================
+                        // MEMORIA
+                        // =====================================================
+
+                        "Memoria" -> {
+
+                            Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+
+                                // Título de la sección.
+                                Text(text = "Memoria", color = Color.White, fontSize = 22.sp)
+
+                                Spacer(modifier = Modifier.height(20.dp))
+
+                                // Estado actual de la sección.
+                                Text(
+                                        text =
+                                                "La memoria de Apache estará disponible próximamente.",
+                                        color = Color(0xFFAAAAAA),
+                                        fontSize = 15.sp
+                                )
+                            }
+                        }
+
+                        // =====================================================
+                        // AYUDA
+                        // =====================================================
+
+                        "Ayuda" -> {
+
+                            Column(
+                                    modifier =
+                                            Modifier.fillMaxSize()
+                                                    .verticalScroll(rememberScrollState())
+                                                    .padding(24.dp)
+                            ) {
+
+                                // Título de la sección.
+                                Text(text = "Ayuda", color = Color.White, fontSize = 22.sp)
+
+                                Spacer(modifier = Modifier.height(20.dp))
+
+                                // Introducción.
+                                Text(
+                                        text = "¿Qué puedo pedirle a Apache?",
+                                        color = Color.White,
+                                        fontSize = 17.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Text(
+                                        text =
+                                                "Escribe o habla con naturalidad. Apache elige la herramienta adecuada y te pide confirmación antes de acciones sensibles.",
+                                        color = Color(0xFFAAAAAA),
+                                        fontSize = 15.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(24.dp))
+
+                                Text(
+                                        text = "Qué puede hacer",
+                                        color = Color.White,
+                                        fontSize = 17.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Text(
+                                        text =
+                                                "• Aplicaciones: abrir, cerrar o comprobar si una aplicación está abierta.\n• Música: reproducir, pausar, cambiar de pista, consultar lo que suena y ajustar el volumen.\n• Tiempo: consultar el tiempo actual y la previsión.\n• Sistema: ver recursos e información del ordenador.\n• Fecha y hora: consultar la hora actual.",
+                                        color = Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(24.dp))
+
+                                // EJEMPLOS DE MÚSICA
+
+                                Text(text = "Música", color = Color(0xFF1DB954), fontSize = 17.sp)
+
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Text(
+                                        text = "«Pon música»",
+                                        color = Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Text(
+                                        text = "«Pausa la música»",
+                                        color = Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Text(
+                                        text = "«Sube el volumen»",
+                                        color = Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Text(
+                                        text = "«¿Qué está sonando?»",
+                                        color = Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Text(
+                                        text = "«Pon el volumen al 40 %»",
+                                        color = Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(20.dp))
 
                                 // =================================================
-                                // BOTÓN DE VOZ
+                                // EJEMPLOS DE APLICACIONES
                                 // =================================================
 
-                                Button(
-                                        enabled = !isLoading && !listenModeEnabled,
-                                        onClick = { toggleRecording() },
-                                        colors =
-                                                ButtonDefaults.buttonColors(
-                                                        containerColor =
-                                                                if (isRecording) {
-                                                                    Color(0xFFAA2222)
-                                                                } else {
-                                                                    Color(0xFF1DB954)
-                                                                }
-                                                )
-                                ) {
-                                    Text(
-                                            text =
-                                                    if (isRecording) {
-                                                        "Detener"
-                                                    } else {
-                                                        "Micrófono"
-                                                    },
-                                            color = Color.Black
-                                    )
-                                }
+                                Text(
+                                        text = "Aplicaciones",
+                                        color = Color(0xFF1DB954),
+                                        fontSize = 17.sp
+                                )
 
-                                Spacer(modifier = Modifier.width(10.dp))
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Text(
+                                        text = "«Abre Discord»",
+                                        color = Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Text(
+                                        text = "«Abre Discord y la calculadora»",
+                                        color = Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Text(
+                                        text = "«Cierra Discord»",
+                                        color = Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Text(
+                                        text = "«¿Está abierto Visual Studio Code?»",
+                                        color = Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(20.dp))
 
                                 // =================================================
-                                // BOTÓN ENVIAR
+                                // EJEMPLOS DE SISTEMA
                                 // =================================================
 
-                                Button(
-                                        // Desactivamos el botón mientras esperamos.
-                                        enabled = !isLoading && !isRecording,
+                                Text(text = "Sistema", color = Color(0xFF1DB954), fontSize = 17.sp)
 
-                                        // Utilizamos la misma función que Enter.
-                                        onClick = { sendMessage() },
+                                Spacer(modifier = Modifier.height(6.dp))
 
-                                        // Color verde de Apache.
-                                        colors =
-                                                ButtonDefaults.buttonColors(
-                                                        containerColor = Color(0xFF1DB954)
-                                                )
-                                ) { Text(text = "Enviar", color = Color.Black) }
+                                Text(
+                                        text = "«¿Qué recursos está usando mi PC?»",
+                                        color = Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(20.dp))
+
+                                // =================================================
+                                // EJEMPLOS DE TIEMPO
+                                // =================================================
+
+                                Text(text = "Tiempo", color = Color(0xFF1DB954), fontSize = 17.sp)
+
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Text(
+                                        text = "«¿Qué tiempo hace mañana?»",
+                                        color = Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(24.dp))
+
+                                Text(
+                                        text = "Control por voz",
+                                        color = Color(0xFF1DB954),
+                                        fontSize = 17.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Text(
+                                        text =
+                                                "Pulsa el micrófono para una orden puntual. Activa «Escucha activada» para hablar sin tocar el botón: di «Apache» seguido de la orden, por ejemplo «Apache, abre Discord». El modo sigue activo después de cada respuesta. Para detenerlo, di «Apache, apaga» o «Apache, corto», o pulsa el botón de escucha.",
+                                        color = Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
                             }
                         }
                     }
 
-                    // =====================================================
-                    // MEMORIA
-                    // =====================================================
+                }
 
-                    "Memoria" -> {
-
-                        Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-
-                            // Título de la sección.
-                            Text(text = "Memoria", color = Color.White, fontSize = 22.sp)
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            // Estado actual de la sección.
-                            Text(
-                                    text = "La memoria de Apache estará disponible próximamente.",
-                                    color = Color(0xFFAAAAAA),
-                                    fontSize = 15.sp
-                            )
-                        }
-                    }
-
-                    // =====================================================
-                    // AYUDA
-                    // =====================================================
-
-                    "Ayuda" -> {
-
-                        Column(
-                                modifier =
-                                        Modifier.fillMaxSize()
-                                                .verticalScroll(rememberScrollState())
-                                                .padding(24.dp)
+                // Avisos no leídos, superpuestos en la esquina superior derecha.
+                Column(modifier = Modifier.align(Alignment.TopEnd).padding(20.dp).width(320.dp)) {
+                    pendingNotifications.forEach { notification ->
+                        Surface(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                                color = Color(0xFF1DB954),
+                                shape = RoundedCornerShape(10.dp)
                         ) {
-
-                            // Título de la sección.
-                            Text(text = "Ayuda", color = Color.White, fontSize = 22.sp)
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            // Introducción.
-                            Text(
-                                    text = "¿Qué puedo pedirle a Apache?",
-                                    color = Color.White,
-                                    fontSize = 17.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Text(
-                                    text =
-                                            "Escribe o habla con naturalidad. Apache elige la herramienta adecuada y te pide confirmación antes de acciones sensibles.",
-                                    color = Color(0xFFAAAAAA),
-                                    fontSize = 15.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(24.dp))
-
-                            Text(text = "Qué puede hacer", color = Color.White, fontSize = 17.sp)
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Text(
-                                    text =
-                                            "• Aplicaciones: abrir, cerrar o comprobar si una aplicación está abierta.\n• Música: reproducir, pausar, cambiar de pista, consultar lo que suena y ajustar el volumen.\n• Tiempo: consultar el tiempo actual y la previsión.\n• Sistema: ver recursos e información del ordenador.\n• Fecha y hora: consultar la hora actual.",
-                                    color = Color(0xFFCCCCCC),
-                                    fontSize = 15.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(24.dp))
-
-                            // EJEMPLOS DE MÚSICA
-
-                            Text(text = "Música", color = Color(0xFF1DB954), fontSize = 17.sp)
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(text = "«Pon música»", color = Color(0xFFCCCCCC), fontSize = 15.sp)
-
-                            Text(
-                                    text = "«Pausa la música»",
-                                    color = Color(0xFFCCCCCC),
-                                    fontSize = 15.sp
-                            )
-
-                            Text(
-                                    text = "«Sube el volumen»",
-                                    color = Color(0xFFCCCCCC),
-                                    fontSize = 15.sp
-                            )
-
-                            Text(
-                                    text = "«¿Qué está sonando?»",
-                                    color = Color(0xFFCCCCCC),
-                                    fontSize = 15.sp
-                            )
-
-                            Text(
-                                    text = "«Pon el volumen al 40 %»",
-                                    color = Color(0xFFCCCCCC),
-                                    fontSize = 15.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            // =================================================
-                            // EJEMPLOS DE APLICACIONES
-                            // =================================================
-
-                            Text(text = "Aplicaciones", color = Color(0xFF1DB954), fontSize = 17.sp)
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                    text = "«Abre Discord»",
-                                    color = Color(0xFFCCCCCC),
-                                    fontSize = 15.sp
-                            )
-
-                            Text(
-                                    text = "«Abre Discord y la calculadora»",
-                                    color = Color(0xFFCCCCCC),
-                                    fontSize = 15.sp
-                            )
-
-                            Text(
-                                    text = "«Cierra Discord»",
-                                    color = Color(0xFFCCCCCC),
-                                    fontSize = 15.sp
-                            )
-
-                            Text(
-                                    text = "«¿Está abierto Visual Studio Code?»",
-                                    color = Color(0xFFCCCCCC),
-                                    fontSize = 15.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            // =================================================
-                            // EJEMPLOS DE SISTEMA
-                            // =================================================
-
-                            Text(text = "Sistema", color = Color(0xFF1DB954), fontSize = 17.sp)
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                    text = "«¿Qué recursos está usando mi PC?»",
-                                    color = Color(0xFFCCCCCC),
-                                    fontSize = 15.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            // =================================================
-                            // EJEMPLOS DE TIEMPO
-                            // =================================================
-
-                            Text(text = "Tiempo", color = Color(0xFF1DB954), fontSize = 17.sp)
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                    text = "«¿Qué tiempo hace mañana?»",
-                                    color = Color(0xFFCCCCCC),
-                                    fontSize = 15.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(24.dp))
-
-                            Text(
-                                    text = "Control por voz",
-                                    color = Color(0xFF1DB954),
-                                    fontSize = 17.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                    text =
-                                            "Pulsa el micrófono para una orden puntual. Activa «Escucha activada» para hablar sin tocar el botón: di «Apache» seguido de la orden, por ejemplo «Apache, abre Discord». El modo sigue activo después de cada respuesta. Para detenerlo, di «Apache, apaga» o «Apache, corto», o pulsa el botón de escucha.",
-                                    color = Color(0xFFCCCCCC),
-                                    fontSize = 15.sp
-                            )
+                            Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(text = notification.title, color = Color.Black, fontSize = 14.sp)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                            text = notification.message,
+                                            color = Color(0xFF0A2E17),
+                                            fontSize = 13.sp
+                                    )
+                                }
+                                Text(
+                                        text = "✕",
+                                        color = Color.Black,
+                                        fontSize = 14.sp,
+                                        modifier = Modifier.clickable { dismissNotification(notification.id) }
+                                )
+                            }
                         }
                     }
                 }
-            }
         }
     }
 }
-
-/**
- * Dibuja una burbuja de mensaje.
- *
- * Los mensajes del usuario aparecen a la derecha. Los mensajes de Apache aparecen a la izquierda.
- */
-@Composable
-fun MessageBubble(message: ChatMessage) {
-
-    Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement =
-                    if (message.isUser) {
-                        Arrangement.End
-                    } else {
-                        Arrangement.Start
-                    }
-    ) {
-        Surface(
-                color =
-                        if (message.isUser) {
-                            Color(0xFF1DB954)
-                        } else {
-                            Color(0xFF242424)
-                        },
-                shape = RoundedCornerShape(12.dp)
-        ) {
-
-            // Permite seleccionar y copiar el texto del mensaje.
-            SelectionContainer {
-                Text(
-                        text = message.text,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        color =
-                                if (message.isUser) {
-                                    Color.Black
-                                } else {
-                                    Color.White
-                                },
-                        fontSize = 15.sp
-                )
-            }
-        }
-    }
 }
