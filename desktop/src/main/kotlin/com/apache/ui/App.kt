@@ -360,10 +360,14 @@ private fun synthesizeSpeech(text: String): VoiceSpeechResponse {
  * Es una llamada bloqueante (red + reproducción), así que debe ejecutarse siempre desde un hilo
  * secundario, nunca desde el hilo de la interfaz. Si la síntesis de voz falla, no interrumpe la
  * conversación: la respuesta ya se ha mostrado en texto.
+ *
+ * Si [muted] es `true` (el usuario ha silenciado la voz de Apache), no se llega a llamar
+ * siquiera al endpoint de Text-to-Speech: así evitamos gastar la llamada a Gemini para generar
+ * un audio que no se va a reproducir.
  */
-private fun speakReply(text: String, audioPlayer: AudioPlayer) {
+private fun speakReply(text: String, audioPlayer: AudioPlayer, muted: Boolean) {
 
-    if (text.isBlank()) {
+    if (text.isBlank() || muted) {
         return
     }
 
@@ -556,6 +560,10 @@ LaunchedEffect(Unit) {
     // Indica si el modo escucha (wake word "Apache") está activado.
     var listenModeEnabled by remember { mutableStateOf(false) }
 
+    // Indica si el usuario ha silenciado la voz de Apache (respuestas por TTS).
+    // El texto de la respuesta se sigue mostrando igual; solo se omite el audio.
+    var isMuted by remember { mutableStateOf(false) }
+
     // Guarda la última grabación realizada.
     var recordedAudio by remember { mutableStateOf<ByteArray?>(null) }
 
@@ -604,7 +612,7 @@ LaunchedEffect(Unit) {
 
                 // Si el mensaje viene de una interacción por voz, Apache responde también hablando.
                 if (speak) {
-                    speakReply(reply, audioPlayer)
+                    speakReply(reply, audioPlayer, isMuted)
                 }
             } catch (e: Exception) {
 
@@ -748,7 +756,7 @@ LaunchedEffect(Unit) {
                 isLoading = false
             }
 
-            speakReply(reply, audioPlayer)
+            speakReply(reply, audioPlayer, isMuted)
         } catch (e: Exception) {
 
             withContext(Dispatchers.Main) {
@@ -770,7 +778,7 @@ LaunchedEffect(Unit) {
             messages = messages + ChatMessage("Modo escucha desactivado.", false)
         }
 
-        speakReply("Modo escucha desactivado.", audioPlayer)
+        speakReply("Modo escucha desactivado.", audioPlayer, isMuted)
     }
 
     /**
@@ -1009,8 +1017,28 @@ LaunchedEffect(Unit) {
                             // Zona principal del chat.
                             Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
 
-                                // Título.
-                                Text(text = "Asistente", color = Color.White, fontSize = 22.sp)
+                                // Título + botón de silenciar la voz de Apache.
+                                Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(text = "Asistente", color = Color.White, fontSize = 22.sp)
+
+                                    Surface(
+                                            color = if (isMuted) Color(0xFF3A2020) else Color(0xFF1E2A22),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier =
+                                                    Modifier.clickable { isMuted = !isMuted }
+                                    ) {
+                                        Text(
+                                                text = if (isMuted) "🔇 Voz silenciada" else "🔊 Voz activada",
+                                                color = if (isMuted) Color(0xFFE5A0A0) else Color(0xFFA7E8BE),
+                                                fontSize = 13.sp,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                }
 
                                 Spacer(modifier = Modifier.height(20.dp))
 

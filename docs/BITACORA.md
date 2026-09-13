@@ -1,5 +1,69 @@
 # Bitácora de desarrollo — Apache
 
+## 13/09/2026 — fix/notifications-followup + voz + empaquetado
+
+### Objetivo
+
+Cerrar los pendientes detectados en la sesión anterior sobre notificaciones, añadir un control de silencio para la voz de Apache, y dar el primer paso para distribuir Apache 0.1.0 como ejecutable.
+
+### Trabajo realizado
+
+* Revisado el flujo completo `ReminderScheduler → ReminderService → NotificationService → NotificationRepository → MySQL`: confirmado que ya persiste correctamente cada notificación generada por un recordatorio. No ha hecho falta ningún cambio en esta parte.
+
+* Corregido el bug de notificaciones que "reaparecían" en el Desktop:
+
+  * Identificada la causa: `dismissNotification` hacía un descarte optimista en memoria mientras `markNotificationRead` se confirmaba en segundo plano; el siguiente polling sobrescribía `pendingNotifications` con la respuesta del servidor (todavía "no leída") y la notificación volvía a aparecer.
+
+  * Añadido un conjunto `locallyDismissed` compartido entre el descarte del usuario y el bucle de polling, que oculta la notificación mientras la confirmación está en vuelo y se sincroniza de nuevo con el servidor en cuanto este la reporta como leída.
+
+  * Si `markNotificationRead` falla, se deshace el descarte local para no perder la notificación de vista para siempre.
+
+* Corregido que `fetchUnreadNotifications()` se ejecutaba en el hilo de UI (bloqueante) dentro del polling; ahora usa `withContext(Dispatchers.IO)`, igual que el resto de llamadas de red del Desktop.
+
+* Añadido endpoint `GET /api/notifications/read` en `NotificationController` (más los métodos correspondientes en `NotificationService` y `NotificationRepository`) para consultar el histórico de notificaciones ya leídas, sin borrado físico.
+
+* Añadido un botón de silenciar/activar la voz de Apache en la sección Chat del Desktop:
+
+  * Nuevo estado `isMuted` en `App()`.
+
+  * `speakReply` ahora recibe `muted: Boolean` y no llega a llamar al endpoint de Text-to-Speech si la voz está silenciada (ahorra la llamada a Gemini, no solo la reproducción).
+
+  * El texto de la respuesta se sigue mostrando siempre igual; el silencio solo afecta al audio.
+
+* Añadida configuración de `nativeDistributions` en `desktop/build.gradle.kts` (formatos `Msi` y `Exe` vía `jpackage`) para poder generar un instalador/ejecutable de Windows de la interfaz de escritorio.
+
+### Problemas encontrados
+
+* El empaquetado con `nativeDistributions` solo genera el ejecutable del módulo `desktop`. Apache sigue siendo dos procesos independientes (`core` como servicio Spring Boot en el puerto 8080, más MySQL): el `.exe`/`.msi` no arranca ni empaqueta ninguno de los dos. Por ahora hay que seguir arrancando `core` y MySQL a mano antes de abrir el ejecutable.
+
+### Estado actual
+
+* [x] Persistencia de notificaciones verificada extremo a extremo
+* [x] Notificaciones descartadas ya no reaparecen por condición de carrera
+* [x] Polling de notificaciones fuera del hilo de UI
+* [x] Endpoint de histórico de notificaciones leídas
+* [x] Botón de silenciar la voz de Apache
+* [x] Configuración de empaquetado nativo (Msi/Exe) para el Desktop
+* [ ] Arranque unificado de `core` + MySQL junto con el ejecutable
+* [ ] Icono personalizado y firma del instalador
+* [ ] Purga o gestión de notificaciones muy antiguas
+
+### Decisiones de diseño
+
+* Las notificaciones leídas se conservan en MySQL (no se borran físicamente); mantener el histórico permite futuras consultas tipo "qué recordatorios se dispararon esta semana" y conserva el sentido de `readAt`.
+
+* El silencio de voz es solo del lado del Desktop y no se persiste entre sesiones (vuelve a activarse al reiniciar la app); si hace falta recordarlo, es un cambio pequeño (guardarlo en `~/.apache/session.properties`, igual que `conversationId`).
+
+### Siguiente fase — hacia Apache 0.2.0
+
+* Unificar el arranque: hacer que el ejecutable del Desktop lance automáticamente `core` (por ejemplo, empaquetando el jar de Spring Boot como recurso y arrancándolo como subproceso), o documentar y automatizar con un `.bat`/servicio de Windows mientras tanto.
+* Comprobar que MySQL esté disponible antes de arrancar `core` y mostrar un error claro en el Desktop si no lo está, en vez de que el polling falle en silencio.
+* Añadir un icono y metadatos propios al instalador (`iconFile`, firma de código si se va a distribuir fuera del propio equipo).
+* Persistir la preferencia de silencio de voz entre sesiones.
+* Job de purga o paginación para el histórico de notificaciones leídas, antes de que crezca sin límite.
+* Corregir los problemas de codificación UTF-8 detectados en la sesión anterior (`recordarÃ©`, etc.) en la consola/cliente.
+* Revisar y ampliar la cobertura de pruebas del flujo de recordatorios y notificaciones (hoy validado solo manualmente).
+
 ## 13/09/2026 — feature/reminders-notifications
 
 ### Recordatorios y notificaciones
