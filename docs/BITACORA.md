@@ -1,4 +1,175 @@
 # Bitácora de desarrollo — Apache
+
+## 13/09/2026 — feature/reminders-notifications
+
+### Recordatorios y notificaciones
+
+### Objetivo
+
+Implementar y comprobar el sistema de recordatorios de Apache 0.1, conectando Gemini con las herramientas del Core, MySQL, el scheduler y las notificaciones nativas de Windows.
+
+### Trabajo realizado
+
+* Completada la implementación del sistema de recordatorios sobre MySQL.
+
+* Creado `ReminderRepository` para gestionar los recordatorios mediante Exposed.
+
+* Creado `ReminderService` para separar la lógica de negocio del acceso a datos.
+
+* Implementados los estados de los recordatorios:
+
+  * `pending`
+  * `triggered`
+  * `cancelled`
+
+* Implementado `ReminderScheduler` mediante `@Scheduled`, realizando comprobaciones periódicas de recordatorios pendientes.
+
+* Creado `NotificationRepository` para acceder a la tabla `notification`.
+
+* Creado `NotificationService` para generar y gestionar notificaciones.
+
+* Creado `NotificationController` con endpoints para:
+
+  * Consultar notificaciones.
+  * Consultar únicamente las no leídas.
+  * Marcar una notificación como leída.
+  * Marcar todas las notificaciones como leídas.
+
+* Añadida la herramienta `createReminder` al `ToolRegistry`.
+
+* Confirmado mediante los logs del Core que `createReminder` está correctamente registrada.
+
+* Implementada la comunicación del Desktop con el Core para consultar notificaciones pendientes.
+
+* Implementado el polling periódico de notificaciones en el cliente Desktop.
+
+* Implementado `WindowsNotificationManager` para mostrar notificaciones nativas de Windows mediante AWT.
+
+### Incidencias solucionadas
+
+* El envío de peticiones mediante `curl.exe` desde PowerShell provocaba errores de JSON por problemas de escapado de comillas.
+
+* Se sustituyó la prueba por `Invoke-RestMethod` utilizando JSON generado con `ConvertTo-Json`.
+
+* Las peticiones con caracteres especiales presentaban problemas de codificación UTF-8 al enviarlas desde PowerShell.
+
+* Se solucionó la prueba de envío utilizando explícitamente bytes UTF-8:
+
+```text
+PowerShell
+↓
+JSON
+↓
+UTF-8
+↓
+/api/chat
+```
+
+* También se detectó que la consola muestra algunos caracteres como `recordarÃ©`, aunque esto no impide el funcionamiento del sistema.
+
+### Prueba completa realizada
+
+Se probó mediante lenguaje natural:
+
+```text
+"Recuérdame dentro de 2 minutos que tengo que probar Apache"
+```
+
+El flujo completo funcionó correctamente:
+
+```text
+Usuario
+↓
+ChatController
+↓
+Agent
+↓
+Gemini
+↓
+createReminder
+↓
+ReminderService
+↓
+ReminderRepository
+↓
+MySQL
+↓
+ReminderScheduler
+↓
+NotificationService
+↓
+WindowsNotificationManager
+↓
+Notificación de Windows
+```
+
+El recordatorio se creó correctamente en MySQL con:
+
+```text
+title      = Probar Apache
+trigger_at = 2026-09-13 22:37:00
+status     = pending
+```
+
+Una vez alcanzada la hora programada, el estado cambió correctamente:
+
+```text
+pending → triggered
+```
+
+También se confirmó que Windows mostró correctamente la notificación del recordatorio.
+
+### Estado actual
+
+* [x] `ReminderRepository`
+* [x] `ReminderService`
+* [x] `ReminderScheduler`
+* [x] `createReminder`
+* [x] `NotificationRepository`
+* [x] `NotificationService`
+* [x] `NotificationController`
+* [x] Consulta de notificaciones desde Desktop
+* [x] Polling de notificaciones
+* [x] Notificación nativa de Windows
+* [x] Creación de recordatorio mediante lenguaje natural
+* [x] Persistencia del recordatorio en MySQL
+* [x] Cambio automático `pending → triggered`
+* [x] Flujo completo de recordatorio probado
+
+### Pendiente / Problemas detectados
+
+* Comprobar y asegurar que cada recordatorio disparado genera correctamente su registro persistente en `notification`.
+
+* Revisar el comportamiento de las notificaciones ya generadas y su estado `read`.
+
+* Evitar que las notificaciones ya gestionadas vuelvan a aparecer innecesariamente durante el polling.
+
+* Añadir una gestión completa de notificaciones desde Apache:
+
+  * Ver notificaciones pendientes.
+  * Marcar una notificación como leída.
+  * Marcar todas como leídas.
+  * Gestionar o descartar notificaciones antiguas.
+  * Mantener sincronizado el estado entre MySQL, Core y Desktop.
+
+* Corregir posteriormente los problemas de visualización UTF-8 (`recordarÃ©`, `¿`, `é`, etc.) en las respuestas mostradas por el cliente o la consola.
+
+### Decisiones de diseño
+
+* Los recordatorios permanecen persistidos en MySQL.
+
+* El `ReminderScheduler` es responsable únicamente de detectar recordatorios vencidos y delegar su procesamiento en `ReminderService`.
+
+* `ReminderService` es responsable de convertir un recordatorio vencido en una notificación.
+
+* El Desktop no ejecuta directamente la lógica de recordatorios; únicamente consulta las notificaciones expuestas por el Core.
+
+* Las notificaciones se gestionan mediante estado (`read`) para separar la generación del aviso de su lectura por parte del usuario.
+
+### Siguiente fase
+
+Completar el sistema de **gestión de notificaciones**, asegurando la persistencia, lectura, descarte y sincronización entre **MySQL → Core → Desktop → Windows** antes de continuar con nuevas funcionalidades de Apache 0.1.
+
 ## 12/09/2026 — feature/database
 
 ### Configuración de base de datos MySQL
