@@ -1,0 +1,523 @@
+diff --git a/apache-notifications-voz-empaquetado.patch b/apache-notifications-voz-empaquetado.patch
+deleted file mode 100644
+index 2dbbec1..0000000
+--- a/apache-notifications-voz-empaquetado.patch
++++ /dev/null
+@@ -1,319 +0,0 @@
+-diff --git a/core/src/main/kotlin/com/apache/api/NotificationController.kt b/core/src/main/kotlin/com/apache/api/NotificationController.kt
+-index 4e2804b..fbcce0f 100644
+---- a/core/src/main/kotlin/com/apache/api/NotificationController.kt
+-+++ b/core/src/main/kotlin/com/apache/api/NotificationController.kt
+-@@ -31,6 +31,17 @@ class NotificationController(
+-             .listNotifications(ApacheDefaults.DEFAULT_USER_ID, onlyUnread)
+-             .map { it.toResponse() }
+- 
+-+    /**
+-+     * Histórico de notificaciones ya leídas (por ejemplo, para un panel de
+-+     * "notificaciones anteriores" en el Desktop). No hay borrado físico: ver
+-+     * [com.apache.database.repository.NotificationRepository.findReadByUser].
+-+     */
+-+    @GetMapping("/read")
+-+    fun listRead(): List<NotificationResponse> =
+-+        notificationService
+-+            .listRead(ApacheDefaults.DEFAULT_USER_ID)
+-+            .map { it.toResponse() }
+-+
+-     @PostMapping("/{id}/read")
+-     fun markRead(@PathVariable id: Long): MarkReadResponse =
+-         MarkReadResponse(success = notificationService.markRead(id))
+-diff --git a/core/src/main/kotlin/com/apache/database/repository/NotificationRepository.kt b/core/src/main/kotlin/com/apache/database/repository/NotificationRepository.kt
+-index ae4e660..b215023 100644
+---- a/core/src/main/kotlin/com/apache/database/repository/NotificationRepository.kt
+-+++ b/core/src/main/kotlin/com/apache/database/repository/NotificationRepository.kt
+-@@ -75,6 +75,21 @@ class NotificationRepository {
+-         }
+-     }
+- 
+-+    /**
+-+     * Notificaciones ya leídas de un usuario (histórico), las más recientes primero.
+-+     *
+-+     * Se mantienen en la tabla en vez de borrarse físicamente: `readAt` solo
+-+     * tiene sentido si conservamos la fila, y así el usuario puede consultar
+-+     * más adelante qué recordatorios se han disparado.
+-+     */
+-+    fun findReadByUser(userId: Long): List<NotificationRecord> = transaction {
+-+        Notifications
+-+            .selectAll()
+-+            .where { (Notifications.userId eq userId) and (Notifications.read eq true) }
+-+            .orderBy(Notifications.createdAt, SortOrder.DESC)
+-+            .map { it.toRecord() }
+-+    }
+-+
+-     private fun ResultRow.toRecord() = NotificationRecord(
+-         id = this[Notifications.id],
+-         userId = this[Notifications.userId],
+-diff --git a/core/src/main/kotlin/com/apache/database/service/NotificationService.kt b/core/src/main/kotlin/com/apache/database/service/NotificationService.kt
+-index 6feb20b..d3a11f9 100644
+---- a/core/src/main/kotlin/com/apache/database/service/NotificationService.kt
+-+++ b/core/src/main/kotlin/com/apache/database/service/NotificationService.kt
+-@@ -40,6 +40,10 @@ class NotificationService(
+-     fun listNotifications(userId: Long, onlyUnread: Boolean = false): List<NotificationRecord> =
+-         notificationRepository.findByUser(userId, onlyUnread)
+- 
+-+    /** Histórico de notificaciones ya leídas de un usuario. */
+-+    fun listRead(userId: Long): List<NotificationRecord> =
+-+        notificationRepository.findReadByUser(userId)
+-+
+-     fun markRead(notificationId: Long): Boolean =
+-         notificationRepository.markRead(notificationId)
+- 
+-diff --git a/desktop/build.gradle.kts b/desktop/build.gradle.kts
+-index b75231f..92a1b23 100644
+---- a/desktop/build.gradle.kts
+-+++ b/desktop/build.gradle.kts
+-@@ -31,5 +31,28 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach
+- compose.desktop {
+-     application {
+-         mainClass = "com.apache.MainKt"
+-+
+-+        // Genera el instalador/ejecutable nativo de Windows (jpackage por debajo).
+-+        //
+-+        // IMPORTANTE: esto empaqueta únicamente el módulo `desktop` (la interfaz).
+-+        // Apache sigue necesitando que `core` (Spring Boot, puerto 8080) y MySQL
+-+        // estén arrancados por separado: el ejecutable no los incluye ni los
+-+        // lanza automáticamente. Ver docs/BITACORA.md, sección "Siguiente fase",
+-+        // para la tarea pendiente de unificar el arranque en 0.2.0.
+-+        nativeDistributions {
+-+            targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe)
+-+
+-+            packageName = "Apache"
+-+            packageVersion = "0.1.0"
+-+            description = "Apache — asistente local de escritorio"
+-+            vendor = "FranHuisa"
+-+
+-+            windows {
+-+                menu = true
+-+                shortcut = true
+-+                dirChooser = true
+-+                upgradeUuid = "5f2f2b3a-6d1e-4b6a-9b7a-2f1a6c3d9e10"
+-+            }
+-+        }
+-     }
+- }
+-\ No newline at end of file
+-diff --git a/desktop/src/main/kotlin/com/apache/ui/App.kt b/desktop/src/main/kotlin/com/apache/ui/App.kt
+-index bf50c8e..d4346c5 100644
+---- a/desktop/src/main/kotlin/com/apache/ui/App.kt
+-+++ b/desktop/src/main/kotlin/com/apache/ui/App.kt
+-@@ -360,10 +360,14 @@ private fun synthesizeSpeech(text: String): VoiceSpeechResponse {
+-  * Es una llamada bloqueante (red + reproducción), así que debe ejecutarse siempre desde un hilo
+-  * secundario, nunca desde el hilo de la interfaz. Si la síntesis de voz falla, no interrumpe la
+-  * conversación: la respuesta ya se ha mostrado en texto.
+-+ *
+-+ * Si [muted] es `true` (el usuario ha silenciado la voz de Apache), no se llega a llamar
+-+ * siquiera al endpoint de Text-to-Speech: así evitamos gastar la llamada a Gemini para generar
+-+ * un audio que no se va a reproducir.
+-  */
+--private fun speakReply(text: String, audioPlayer: AudioPlayer) {
+-+private fun speakReply(text: String, audioPlayer: AudioPlayer, muted: Boolean) {
+- 
+--    if (text.isBlank()) {
+-+    if (text.isBlank() || muted) {
+-         return
+-     }
+- 
+-@@ -418,15 +422,26 @@ fun App() {
+-     // -----------------------------------------------------------------
+-     var pendingNotifications by remember { mutableStateOf<List<NotificationDto>>(emptyList()) }
+- 
+-+    // Ids descartados localmente (el usuario pulsó la "✕") a la espera de que
+-+    // el Core confirme el "marcar como leída". Compartido con el bucle de
+-+    // polling de más abajo para que no reaparezcan mientras esa confirmación
+-+    // está en vuelo. Ver el comentario dentro del LaunchedEffect.
+-+    val locallyDismissed = remember { mutableSetOf<Long>() }
+-+
+-     fun dismissNotification(id: Long) {
+-         pendingNotifications = pendingNotifications.filter { it.id != id }
+-+        locallyDismissed.add(id)
+- 
+-         CoroutineScope(Dispatchers.IO).launch {
+-             try {
+-                 markNotificationRead(id)
+-             } catch (e: Exception) {
+--                // Si falla la llamada de "marcar como leída" no pasa nada grave:
+--                // en el próximo polling puede volver a aparecer, pero no rompemos la UI por esto.
+-+                // Si falla la llamada de "marcar como leída", deshacemos el
+-+                // descarte local: si no, la notificación quedaría oculta para
+-+                // siempre en el Desktop aunque el Core la siga marcando como
+-+                // no leída, y el usuario nunca podría volver a verla ni
+-+                // reintentar marcarla.
+-+                locallyDismissed.remove(id)
+-             }
+-         }
+-     }
+-@@ -436,9 +451,17 @@ LaunchedEffect(Unit) {
+- 
+-     while (true) {
+-         try {
+--            val notifications = fetchUnreadNotifications()
+-+            // Igual que fetchCalendarEvents(): la llamada de red es bloqueante,
+-+            // así que la movemos fuera del hilo de UI.
+-+            val notifications = withContext(Dispatchers.IO) { fetchUnreadNotifications() }
+-+
+-+            // El servidor ya no reporta como no leído lo que se ha confirmado:
+-+            // podemos dejar de "recordarlo" como descartado localmente.
+-+            locallyDismissed.retainAll(notifications.map { it.id }.toSet())
+-+
+-+            val visibleNotifications = notifications.filterNot { it.id in locallyDismissed }
+- 
+--            notifications
+-+            visibleNotifications
+-                 .filter { it.id !in shownNotifications }
+-                 .forEach { notification ->
+-                     println("NOTIFICACIÓN WINDOWS: ${notification.title}")
+-@@ -450,7 +473,7 @@ LaunchedEffect(Unit) {
+-                     shownNotifications.add(notification.id)
+-                 }
+- 
+--            pendingNotifications = notifications
+-+            pendingNotifications = visibleNotifications
+-         } catch (e: Exception) {
+-             // El Core puede no estar arrancado todavía, o haberse caído: lo
+-             // ignoramos y lo volvemos a intentar en el siguiente ciclo.
+-@@ -537,6 +560,10 @@ LaunchedEffect(Unit) {
+-     // Indica si el modo escucha (wake word "Apache") está activado.
+-     var listenModeEnabled by remember { mutableStateOf(false) }
+- 
+-+    // Indica si el usuario ha silenciado la voz de Apache (respuestas por TTS).
+-+    // El texto de la respuesta se sigue mostrando igual; solo se omite el audio.
+-+    var isMuted by remember { mutableStateOf(false) }
+-+
+-     // Guarda la última grabación realizada.
+-     var recordedAudio by remember { mutableStateOf<ByteArray?>(null) }
+- 
+-@@ -585,7 +612,7 @@ LaunchedEffect(Unit) {
+- 
+-                 // Si el mensaje viene de una interacción por voz, Apache responde también hablando.
+-                 if (speak) {
+--                    speakReply(reply, audioPlayer)
+-+                    speakReply(reply, audioPlayer, isMuted)
+-                 }
+-             } catch (e: Exception) {
+- 
+-@@ -729,7 +756,7 @@ LaunchedEffect(Unit) {
+-                 isLoading = false
+-             }
+- 
+--            speakReply(reply, audioPlayer)
+-+            speakReply(reply, audioPlayer, isMuted)
+-         } catch (e: Exception) {
+- 
+-             withContext(Dispatchers.Main) {
+-@@ -751,7 +778,7 @@ LaunchedEffect(Unit) {
+-             messages = messages + ChatMessage("Modo escucha desactivado.", false)
+-         }
+- 
+--        speakReply("Modo escucha desactivado.", audioPlayer)
+-+        speakReply("Modo escucha desactivado.", audioPlayer, isMuted)
+-     }
+- 
+-     /**
+-@@ -990,8 +1017,28 @@ LaunchedEffect(Unit) {
+-                             // Zona principal del chat.
+-                             Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+- 
+--                                // Título.
+--                                Text(text = "Asistente", color = Color.White, fontSize = 22.sp)
+-+                                // Título + botón de silenciar la voz de Apache.
+-+                                Row(
+-+                                        modifier = Modifier.fillMaxWidth(),
+-+                                        horizontalArrangement = Arrangement.SpaceBetween,
+-+                                        verticalAlignment = Alignment.CenterVertically
+-+                                ) {
+-+                                    Text(text = "Asistente", color = Color.White, fontSize = 22.sp)
+-+
+-+                                    Surface(
+-+                                            color = if (isMuted) Color(0xFF3A2020) else Color(0xFF1E2A22),
+-+                                            shape = RoundedCornerShape(8.dp),
+-+                                            modifier =
+-+                                                    Modifier.clickable { isMuted = !isMuted }
+-+                                    ) {
+-+                                        Text(
+-+                                                text = if (isMuted) "🔇 Voz silenciada" else "🔊 Voz activada",
+-+                                                color = if (isMuted) Color(0xFFE5A0A0) else Color(0xFFA7E8BE),
+-+                                                fontSize = 13.sp,
+-+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+-+                                        )
+-+                                    }
+-+                                }
+- 
+-                                 Spacer(modifier = Modifier.height(20.dp))
+- 
+-diff --git a/docs/BITACORA.md b/docs/BITACORA.md
+-index e1e2868..d7ee66b 100644
+---- a/docs/BITACORA.md
+-+++ b/docs/BITACORA.md
+-@@ -1,5 +1,69 @@
+- # Bitácora de desarrollo — Apache
+- 
+-+## 13/09/2026 — fix/notifications-followup + voz + empaquetado
+-+
+-+### Objetivo
+-+
+-+Cerrar los pendientes detectados en la sesión anterior sobre notificaciones, añadir un control de silencio para la voz de Apache, y dar el primer paso para distribuir Apache 0.1.0 como ejecutable.
+-+
+-+### Trabajo realizado
+-+
+-+* Revisado el flujo completo `ReminderScheduler → ReminderService → NotificationService → NotificationRepository → MySQL`: confirmado que ya persiste correctamente cada notificación generada por un recordatorio. No ha hecho falta ningún cambio en esta parte.
+-+
+-+* Corregido el bug de notificaciones que "reaparecían" en el Desktop:
+-+
+-+  * Identificada la causa: `dismissNotification` hacía un descarte optimista en memoria mientras `markNotificationRead` se confirmaba en segundo plano; el siguiente polling sobrescribía `pendingNotifications` con la respuesta del servidor (todavía "no leída") y la notificación volvía a aparecer.
+-+
+-+  * Añadido un conjunto `locallyDismissed` compartido entre el descarte del usuario y el bucle de polling, que oculta la notificación mientras la confirmación está en vuelo y se sincroniza de nuevo con el servidor en cuanto este la reporta como leída.
+-+
+-+  * Si `markNotificationRead` falla, se deshace el descarte local para no perder la notificación de vista para siempre.
+-+
+-+* Corregido que `fetchUnreadNotifications()` se ejecutaba en el hilo de UI (bloqueante) dentro del polling; ahora usa `withContext(Dispatchers.IO)`, igual que el resto de llamadas de red del Desktop.
+-+
+-+* Añadido endpoint `GET /api/notifications/read` en `NotificationController` (más los métodos correspondientes en `NotificationService` y `NotificationRepository`) para consultar el histórico de notificaciones ya leídas, sin borrado físico.
+-+
+-+* Añadido un botón de silenciar/activar la voz de Apache en la sección Chat del Desktop:
+-+
+-+  * Nuevo estado `isMuted` en `App()`.
+-+
+-+  * `speakReply` ahora recibe `muted: Boolean` y no llega a llamar al endpoint de Text-to-Speech si la voz está silenciada (ahorra la llamada a Gemini, no solo la reproducción).
+-+
+-+  * El texto de la respuesta se sigue mostrando siempre igual; el silencio solo afecta al audio.
+-+
+-+* Añadida configuración de `nativeDistributions` en `desktop/build.gradle.kts` (formatos `Msi` y `Exe` vía `jpackage`) para poder generar un instalador/ejecutable de Windows de la interfaz de escritorio.
+-+
+-+### Problemas encontrados
+-+
+-+* El empaquetado con `nativeDistributions` solo genera el ejecutable del módulo `desktop`. Apache sigue siendo dos procesos independientes (`core` como servicio Spring Boot en el puerto 8080, más MySQL): el `.exe`/`.msi` no arranca ni empaqueta ninguno de los dos. Por ahora hay que seguir arrancando `core` y MySQL a mano antes de abrir el ejecutable.
+-+
+-+### Estado actual
+-+
+-+* [x] Persistencia de notificaciones verificada extremo a extremo
+-+* [x] Notificaciones descartadas ya no reaparecen por condición de carrera
+-+* [x] Polling de notificaciones fuera del hilo de UI
+-+* [x] Endpoint de histórico de notificaciones leídas
+-+* [x] Botón de silenciar la voz de Apache
+-+* [x] Configuración de empaquetado nativo (Msi/Exe) para el Desktop
+-+* [ ] Arranque unificado de `core` + MySQL junto con el ejecutable
+-+* [ ] Icono personalizado y firma del instalador
+-+* [ ] Purga o gestión de notificaciones muy antiguas
+-+
+-+### Decisiones de diseño
+-+
+-+* Las notificaciones leídas se conservan en MySQL (no se borran físicamente); mantener el histórico permite futuras consultas tipo "qué recordatorios se dispararon esta semana" y conserva el sentido de `readAt`.
+-+
+-+* El silencio de voz es solo del lado del Desktop y no se persiste entre sesiones (vuelve a activarse al reiniciar la app); si hace falta recordarlo, es un cambio pequeño (guardarlo en `~/.apache/session.properties`, igual que `conversationId`).
+-+
+-+### Siguiente fase — hacia Apache 0.2.0
+-+
+-+* Unificar el arranque: hacer que el ejecutable del Desktop lance automáticamente `core` (por ejemplo, empaquetando el jar de Spring Boot como recurso y arrancándolo como subproceso, o mediante un launcher/script único), o documentar y automatizar con un `.bat`/servicio de Windows mientras tanto.
+-+* Comprobar que MySQL esté disponible antes de arrancar `core` y mostrar un error claro en el Desktop si no lo está, en vez de que el polling falle en silencio.
+-+* Añadir un icono y metadatos propios al instalador (`iconFile`, firma de código si se va a distribuir fuera del propio equipo).
+-+* Persistir la preferencia de silencio de voz entre sesiones.
+-+* Job de purga o paginación para el histórico de notificaciones leídas, antes de que crezca sin límite.
+-+* Corregir los problemas de codificación UTF-8 detectados en la sesión anterior (`recordarÃ©`, etc.) en la consola/cliente.
+-+* Revisar y ampliar la cobertura de pruebas del flujo de recordatorios y notificaciones (hoy validado solo manualmente).
+-+
+- ## 13/09/2026 — feature/reminders-notifications
+- 
+- ### Recordatorios y notificaciones
+diff --git a/desktop/build.gradle.kts b/desktop/build.gradle.kts
+index b75231f..92a1b23 100644
+--- a/desktop/build.gradle.kts
++++ b/desktop/build.gradle.kts
+@@ -31,5 +31,28 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach
+ compose.desktop {
+     application {
+         mainClass = "com.apache.MainKt"
++
++        // Genera el instalador/ejecutable nativo de Windows (jpackage por debajo).
++        //
++        // IMPORTANTE: esto empaqueta únicamente el módulo `desktop` (la interfaz).
++        // Apache sigue necesitando que `core` (Spring Boot, puerto 8080) y MySQL
++        // estén arrancados por separado: el ejecutable no los incluye ni los
++        // lanza automáticamente. Ver docs/BITACORA.md, sección "Siguiente fase",
++        // para la tarea pendiente de unificar el arranque en 0.2.0.
++        nativeDistributions {
++            targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe)
++
++            packageName = "Apache"
++            packageVersion = "0.1.0"
++            description = "Apache — asistente local de escritorio"
++            vendor = "FranHuisa"
++
++            windows {
++                menu = true
++                shortcut = true
++                dirChooser = true
++                upgradeUuid = "5f2f2b3a-6d1e-4b6a-9b7a-2f1a6c3d9e10"
++            }
++        }
+     }
+ }
+\ No newline at end of file
+diff --git a/desktop/src/main/kotlin/com/apache/ui/App.kt b/desktop/src/main/kotlin/com/apache/ui/App.kt
+index 351a546..d4346c5 100644
+--- a/desktop/src/main/kotlin/com/apache/ui/App.kt
++++ b/desktop/src/main/kotlin/com/apache/ui/App.kt
+@@ -360,10 +360,14 @@ private fun synthesizeSpeech(text: String): VoiceSpeechResponse {
+  * Es una llamada bloqueante (red + reproducción), así que debe ejecutarse siempre desde un hilo
+  * secundario, nunca desde el hilo de la interfaz. Si la síntesis de voz falla, no interrumpe la
+  * conversación: la respuesta ya se ha mostrado en texto.
++ *
++ * Si [muted] es `true` (el usuario ha silenciado la voz de Apache), no se llega a llamar
++ * siquiera al endpoint de Text-to-Speech: así evitamos gastar la llamada a Gemini para generar
++ * un audio que no se va a reproducir.
+  */
+-private fun speakReply(text: String, audioPlayer: AudioPlayer) {
++private fun speakReply(text: String, audioPlayer: AudioPlayer, muted: Boolean) {
+ 
+-    if (text.isBlank()) {
++    if (text.isBlank() || muted) {
+         return
+     }
+ 
+@@ -556,6 +560,10 @@ LaunchedEffect(Unit) {
+     // Indica si el modo escucha (wake word "Apache") está activado.
+     var listenModeEnabled by remember { mutableStateOf(false) }
+ 
++    // Indica si el usuario ha silenciado la voz de Apache (respuestas por TTS).
++    // El texto de la respuesta se sigue mostrando igual; solo se omite el audio.
++    var isMuted by remember { mutableStateOf(false) }
++
+     // Guarda la última grabación realizada.
+     var recordedAudio by remember { mutableStateOf<ByteArray?>(null) }
+ 
+@@ -604,7 +612,7 @@ LaunchedEffect(Unit) {
+ 
+                 // Si el mensaje viene de una interacción por voz, Apache responde también hablando.
+                 if (speak) {
+-                    speakReply(reply, audioPlayer)
++                    speakReply(reply, audioPlayer, isMuted)
+                 }
+             } catch (e: Exception) {
+ 
+@@ -748,7 +756,7 @@ LaunchedEffect(Unit) {
+                 isLoading = false
+             }
+ 
+-            speakReply(reply, audioPlayer)
++            speakReply(reply, audioPlayer, isMuted)
+         } catch (e: Exception) {
+ 
+             withContext(Dispatchers.Main) {
+@@ -770,7 +778,7 @@ LaunchedEffect(Unit) {
+             messages = messages + ChatMessage("Modo escucha desactivado.", false)
+         }
+ 
+-        speakReply("Modo escucha desactivado.", audioPlayer)
++        speakReply("Modo escucha desactivado.", audioPlayer, isMuted)
+     }
+ 
+     /**
+@@ -1009,8 +1017,28 @@ LaunchedEffect(Unit) {
+                             // Zona principal del chat.
+                             Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+ 
+-                                // Título.
+-                                Text(text = "Asistente", color = Color.White, fontSize = 22.sp)
++                                // Título + botón de silenciar la voz de Apache.
++                                Row(
++                                        modifier = Modifier.fillMaxWidth(),
++                                        horizontalArrangement = Arrangement.SpaceBetween,
++                                        verticalAlignment = Alignment.CenterVertically
++                                ) {
++                                    Text(text = "Asistente", color = Color.White, fontSize = 22.sp)
++
++                                    Surface(
++                                            color = if (isMuted) Color(0xFF3A2020) else Color(0xFF1E2A22),
++                                            shape = RoundedCornerShape(8.dp),
++                                            modifier =
++                                                    Modifier.clickable { isMuted = !isMuted }
++                                    ) {
++                                        Text(
++                                                text = if (isMuted) "🔇 Voz silenciada" else "🔊 Voz activada",
++                                                color = if (isMuted) Color(0xFFE5A0A0) else Color(0xFFA7E8BE),
++                                                fontSize = 13.sp,
++                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
++                                        )
++                                    }
++                                }
+ 
+                                 Spacer(modifier = Modifier.height(20.dp))
+ 
+diff --git a/docs/BITACORA.md b/docs/BITACORA.md
+index e1e2868..ca9d037 100644
+--- a/docs/BITACORA.md
++++ b/docs/BITACORA.md
+@@ -1,5 +1,69 @@
+ # Bitácora de desarrollo — Apache
+ 
++## 13/09/2026 — fix/notifications-followup + voz + empaquetado
++
++### Objetivo
++
++Cerrar los pendientes detectados en la sesión anterior sobre notificaciones, añadir un control de silencio para la voz de Apache, y dar el primer paso para distribuir Apache 0.1.0 como ejecutable.
++
++### Trabajo realizado
++
++* Revisado el flujo completo `ReminderScheduler → ReminderService → NotificationService → NotificationRepository → MySQL`: confirmado que ya persiste correctamente cada notificación generada por un recordatorio. No ha hecho falta ningún cambio en esta parte.
++
++* Corregido el bug de notificaciones que "reaparecían" en el Desktop:
++
++  * Identificada la causa: `dismissNotification` hacía un descarte optimista en memoria mientras `markNotificationRead` se confirmaba en segundo plano; el siguiente polling sobrescribía `pendingNotifications` con la respuesta del servidor (todavía "no leída") y la notificación volvía a aparecer.
++
++  * Añadido un conjunto `locallyDismissed` compartido entre el descarte del usuario y el bucle de polling, que oculta la notificación mientras la confirmación está en vuelo y se sincroniza de nuevo con el servidor en cuanto este la reporta como leída.
++
++  * Si `markNotificationRead` falla, se deshace el descarte local para no perder la notificación de vista para siempre.
++
++* Corregido que `fetchUnreadNotifications()` se ejecutaba en el hilo de UI (bloqueante) dentro del polling; ahora usa `withContext(Dispatchers.IO)`, igual que el resto de llamadas de red del Desktop.
++
++* Añadido endpoint `GET /api/notifications/read` en `NotificationController` (más los métodos correspondientes en `NotificationService` y `NotificationRepository`) para consultar el histórico de notificaciones ya leídas, sin borrado físico.
++
++* Añadido un botón de silenciar/activar la voz de Apache en la sección Chat del Desktop:
++
++  * Nuevo estado `isMuted` en `App()`.
++
++  * `speakReply` ahora recibe `muted: Boolean` y no llega a llamar al endpoint de Text-to-Speech si la voz está silenciada (ahorra la llamada a Gemini, no solo la reproducción).
++
++  * El texto de la respuesta se sigue mostrando siempre igual; el silencio solo afecta al audio.
++
++* Añadida configuración de `nativeDistributions` en `desktop/build.gradle.kts` (formatos `Msi` y `Exe` vía `jpackage`) para poder generar un instalador/ejecutable de Windows de la interfaz de escritorio.
++
++### Problemas encontrados
++
++* El empaquetado con `nativeDistributions` solo genera el ejecutable del módulo `desktop`. Apache sigue siendo dos procesos independientes (`core` como servicio Spring Boot en el puerto 8080, más MySQL): el `.exe`/`.msi` no arranca ni empaqueta ninguno de los dos. Por ahora hay que seguir arrancando `core` y MySQL a mano antes de abrir el ejecutable.
++
++### Estado actual
++
++* [x] Persistencia de notificaciones verificada extremo a extremo
++* [x] Notificaciones descartadas ya no reaparecen por condición de carrera
++* [x] Polling de notificaciones fuera del hilo de UI
++* [x] Endpoint de histórico de notificaciones leídas
++* [x] Botón de silenciar la voz de Apache
++* [x] Configuración de empaquetado nativo (Msi/Exe) para el Desktop
++* [ ] Arranque unificado de `core` + MySQL junto con el ejecutable
++* [ ] Icono personalizado y firma del instalador
++* [ ] Purga o gestión de notificaciones muy antiguas
++
++### Decisiones de diseño
++
++* Las notificaciones leídas se conservan en MySQL (no se borran físicamente); mantener el histórico permite futuras consultas tipo "qué recordatorios se dispararon esta semana" y conserva el sentido de `readAt`.
++
++* El silencio de voz es solo del lado del Desktop y no se persiste entre sesiones (vuelve a activarse al reiniciar la app); si hace falta recordarlo, es un cambio pequeño (guardarlo en `~/.apache/session.properties`, igual que `conversationId`).
++
++### Siguiente fase — hacia Apache 0.2.0
++
++* Unificar el arranque: hacer que el ejecutable del Desktop lance automáticamente `core` (por ejemplo, empaquetando el jar de Spring Boot como recurso y arrancándolo como subproceso), o documentar y automatizar con un `.bat`/servicio de Windows mientras tanto.
++* Comprobar que MySQL esté disponible antes de arrancar `core` y mostrar un error claro en el Desktop si no lo está, en vez de que el polling falle en silencio.
++* Añadir un icono y metadatos propios al instalador (`iconFile`, firma de código si se va a distribuir fuera del propio equipo).
++* Persistir la preferencia de silencio de voz entre sesiones.
++* Job de purga o paginación para el histórico de notificaciones leídas, antes de que crezca sin límite.
++* Corregir los problemas de codificación UTF-8 detectados en la sesión anterior (`recordarÃ©`, etc.) en la consola/cliente.
++* Revisar y ampliar la cobertura de pruebas del flujo de recordatorios y notificaciones (hoy validado solo manualmente).
++
+ ## 13/09/2026 — feature/reminders-notifications
+ 
+ ### Recordatorios y notificaciones
