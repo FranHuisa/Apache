@@ -128,6 +128,7 @@ private object SessionStore {
         } catch (e: Exception) {}
     }
 }
+
 // DTO de una notificación tal como la devuelve el Core (ver NotificationController).
 data class NotificationDto(
         val id: Long,
@@ -158,12 +159,28 @@ data class CreateCalendarEventDto(
         val allDay: Boolean = false
 )
 
+data class UpdateCalendarEventDto(
+        val title: String? = null,
+        val startAt: String? = null,
+        val description: String? = null,
+        val endAt: String? = null,
+        val location: String? = null
+)
+
 private fun fetchCalendarEvents(): List<CalendarEventDto> {
-    val request = Request.Builder().url("http://localhost:8080/api/calendar/events").get().build()
+    val request =
+            Request.Builder()
+                    .url("http://localhost:8080/api/calendar/events")
+                    .get()
+                    .build()
 
     httpClient.newCall(request).execute().use { response ->
         val bodyText = response.body?.string().orEmpty()
-        if (!response.isSuccessful) throw RuntimeException("Error del Core: ${response.code}")
+
+        if (!response.isSuccessful) {
+            throw RuntimeException("Error del Core: ${response.code}")
+        }
+
         return objectMapper.readValue(bodyText)
     }
 }
@@ -173,6 +190,75 @@ private fun createCalendarEvent(event: CreateCalendarEventDto): CalendarEventDto
             Request.Builder()
                     .url("http://localhost:8080/api/calendar/events")
                     .post(objectMapper.writeValueAsString(event).toRequestBody(jsonMediaType))
+                    .build()
+
+    httpClient.newCall(request).execute().use { response ->
+        val bodyText = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw RuntimeException(
+                    "Error ${response.code}: ${bodyText.ifBlank { "Sin respuesta del Core." }}"
+            )
+        }
+
+        return objectMapper.readValue(bodyText)
+    }
+}
+
+/** Actualiza un evento existente en el Core. */
+private fun updateCalendarEvent(
+        eventId: Long,
+        event: UpdateCalendarEventDto
+): CalendarEventDto {
+
+    val request =
+            Request.Builder()
+                    .url("http://localhost:8080/api/calendar/events/$eventId")
+                    .put(objectMapper.writeValueAsString(event).toRequestBody(jsonMediaType))
+                    .build()
+
+    httpClient.newCall(request).execute().use { response ->
+        val bodyText = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw RuntimeException(
+                    "Error ${response.code}: ${bodyText.ifBlank { "Sin respuesta del Core." }}"
+            )
+        }
+
+        return objectMapper.readValue(bodyText)
+    }
+}
+
+/** Marca un evento como completado en el Core. */
+private fun completeCalendarEvent(eventId: Long): CalendarEventDto {
+
+    val request =
+            Request.Builder()
+                    .url("http://localhost:8080/api/calendar/events/$eventId/complete")
+                    .post("".toRequestBody(jsonMediaType))
+                    .build()
+
+    httpClient.newCall(request).execute().use { response ->
+        val bodyText = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw RuntimeException(
+                    "Error ${response.code}: ${bodyText.ifBlank { "Sin respuesta del Core." }}"
+            )
+        }
+
+        return objectMapper.readValue(bodyText)
+    }
+}
+
+/** Cancela un evento mediante borrado lógico en el Core. */
+private fun cancelCalendarEvent(eventId: Long): CalendarEventDto {
+
+    val request =
+            Request.Builder()
+                    .url("http://localhost:8080/api/calendar/events/$eventId/cancel")
+                    .post("".toRequestBody(jsonMediaType))
                     .build()
 
     httpClient.newCall(request).execute().use { response ->
@@ -221,6 +307,52 @@ private fun calendarTextFieldColors() =
                 cursorColor = Color(0xFF1DB954)
         )
 
+/**
+ * Devuelve el estado que se debe mostrar en la interfaz.
+ *
+ * `overdue` no se guarda en la base de datos porque depende de la hora actual.
+ * Si el evento tiene hora de finalización, se utiliza esa hora para determinar
+ * si ha quedado atrasado. En caso contrario se utiliza la hora de inicio.
+ */
+private fun calendarDisplayStatus(event: CalendarEventDto): String {
+
+    return when (event.status) {
+        "completed" -> "Completado"
+        "cancelled" -> "Cancelado"
+        else -> {
+            val referenceTime =
+                    event.endAt?.let { LocalDateTime.parse(it) }
+                            ?: LocalDateTime.parse(event.startAt)
+
+            if (referenceTime.isBefore(LocalDateTime.now())) {
+                "Atrasado"
+            } else {
+                "Confirmado"
+            }
+        }
+    }
+}
+
+private fun calendarStatusColor(event: CalendarEventDto): Color {
+
+    return when (calendarDisplayStatus(event)) {
+        "Completado" -> Color(0xFF2E7D5A)
+        "Atrasado" -> Color(0xFF8A5A2B)
+        "Cancelado" -> Color(0xFF6A3030)
+        else -> Color(0xFF1E5E3A)
+    }
+}
+
+private fun calendarStatusTextColor(event: CalendarEventDto): Color {
+
+    return when (calendarDisplayStatus(event)) {
+        "Completado" -> Color(0xFFB8F0D0)
+        "Atrasado" -> Color(0xFFFFD39A)
+        "Cancelado" -> Color(0xFFFFB5B5)
+        else -> Color(0xFFA7E8BE)
+    }
+}
+
 /** Consulta al Core las notificaciones sin leer del usuario. */
 private fun fetchUnreadNotifications(): List<NotificationDto> {
     val request =
@@ -252,6 +384,7 @@ private fun markNotificationRead(id: Long) {
 
     httpClient.newCall(request).execute().close()
 }
+
 /**
  * Envía un mensaje al Apache Core.
  *
@@ -399,11 +532,11 @@ fun App() {
     /**
      * ID de la conversación actual.
      *
-     * Al principio es null. El Core nos devolverá uno después del primer mensaje. var
-     * conversationId by remember { mutableStateOf(SessionStore.loadConversationId()) } * Así Apache
-     * puede mantener el contexto de la conversación.
+     * Al principio es null. El Core nos devolverá uno después del primer mensaje.
+     * Así Apache puede mantener el contexto de la conversación.
      */
     var conversationId by remember { mutableStateOf(SessionStore.loadConversationId()) }
+
     // Lista de mensajes que aparecen en pantalla.
     var messages by remember {
         mutableStateOf(
@@ -430,9 +563,7 @@ fun App() {
     var pendingNotifications by remember { mutableStateOf<List<NotificationDto>>(emptyList()) }
 
     // Ids descartados localmente (el usuario pulsó la "✕") a la espera de que
-    // el Core confirme el "marcar como leída". Compartido con el bucle de
-    // polling de más abajo para que no reaparezcan mientras esa confirmación
-    // está en vuelo. Ver el comentario dentro del LaunchedEffect.
+    // el Core confirme el "marcar como leída".
     val locallyDismissed = remember { mutableSetOf<Long>() }
 
     fun dismissNotification(id: Long) {
@@ -443,11 +574,6 @@ fun App() {
             try {
                 markNotificationRead(id)
             } catch (e: Exception) {
-                // Si falla la llamada de "marcar como leída", deshacemos el
-                // descarte local: si no, la notificación quedaría oculta para
-                // siempre en el Desktop aunque el Core la siga marcando como
-                // no leída, y el usuario nunca podría volver a verla ni
-                // reintentar marcarla.
                 locallyDismissed.remove(id)
             }
         }
@@ -458,53 +584,133 @@ fun App() {
 
         while (true) {
             try {
-                // Igual que fetchCalendarEvents(): la llamada de red es bloqueante,
-                // así que la movemos fuera del hilo de UI.
-                val notifications = withContext(Dispatchers.IO) { fetchUnreadNotifications() }
+                val notifications =
+                        withContext(Dispatchers.IO) {
+                            fetchUnreadNotifications()
+                        }
 
-                // El servidor ya no reporta como no leído lo que se ha confirmado:
-                // podemos dejar de "recordarlo" como descartado localmente.
                 locallyDismissed.retainAll(notifications.map { it.id }.toSet())
 
-                val visibleNotifications = notifications.filterNot { it.id in locallyDismissed }
+                val visibleNotifications =
+                        notifications.filterNot {
+                            it.id in locallyDismissed
+                        }
 
-                visibleNotifications.filter { it.id !in shownNotifications }.forEach { notification
-                    ->
-                    println("NOTIFICACIÓN WINDOWS: ${notification.title}")
-                    WindowsNotificationManager.show(notification.title, notification.message)
+                visibleNotifications
+                        .filter {
+                            it.id !in shownNotifications
+                        }
+                        .forEach { notification ->
+                            println("NOTIFICACIÓN WINDOWS: ${notification.title}")
 
-                    shownNotifications.add(notification.id)
-                }
+                            WindowsNotificationManager.show(
+                                    notification.title,
+                                    notification.message
+                            )
+
+                            shownNotifications.add(notification.id)
+                        }
 
                 pendingNotifications = visibleNotifications
             } catch (e: Exception) {
-                // El Core puede no estar arrancado todavía, o haberse caído: lo
-                // ignoramos y lo volvemos a intentar en el siguiente ciclo.
+                // El Core puede no estar arrancado todavía, o haberse caído:
+                // lo ignoramos y lo volvemos a intentar en el siguiente ciclo.
             }
 
             delay(15_000)
         }
     }
+
     // Controla qué sección de la interfaz está seleccionada.
     var selectedSection by remember { mutableStateOf("Chat") }
 
-    var calendarEvents by remember { mutableStateOf<List<CalendarEventDto>>(emptyList()) }
-    var calendarLoading by remember { mutableStateOf(false) }
-    var calendarError by remember { mutableStateOf<String?>(null) }
-    var calendarTitle by remember { mutableStateOf("") }
-    var calendarDate by remember { mutableStateOf(calendarDate()) }
-    var calendarTime by remember { mutableStateOf(calendarTime()) }
-    var calendarLocation by remember { mutableStateOf("") }
+    // -----------------------------------------------------------------
+    // CALENDARIO
+    // -----------------------------------------------------------------
+
+    var calendarEvents by remember {
+        mutableStateOf<List<CalendarEventDto>>(emptyList())
+    }
+
+    var calendarLoading by remember {
+        mutableStateOf(false)
+    }
+
+    var calendarError by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    var calendarTitle by remember {
+        mutableStateOf("")
+    }
+
+    var calendarDate by remember {
+        mutableStateOf(calendarDate())
+    }
+
+    var calendarTime by remember {
+        mutableStateOf(calendarTime())
+    }
+
+    var calendarLocation by remember {
+        mutableStateOf("")
+    }
+
+    // ID del evento que se está editando.
+    // null significa que estamos creando un evento nuevo.
+    var editingCalendarEventId by remember {
+        mutableStateOf<Long?>(null)
+    }
+
+    // Evento pendiente de confirmación antes de cancelar.
+    var calendarEventPendingCancellation by remember {
+        mutableStateOf<CalendarEventDto?>(null)
+    }
+
+    // Controla si se muestra el archivo de eventos completados.
+    var showCompletedArchive by remember {
+        mutableStateOf(false)
+    }
 
     // Coroutine scope utilizado para ejecutar la petición sin bloquear la interfaz gráfica.
     val scope = rememberCoroutineScope()
+
+    fun resetCalendarForm() {
+        editingCalendarEventId = null
+        calendarTitle = ""
+        calendarLocation = ""
+        calendarDate = calendarDate()
+        calendarTime = calendarTime()
+    }
+
+    fun beginEditCalendarEvent(event: CalendarEventDto) {
+
+        val start = LocalDateTime.parse(event.startAt)
+
+        editingCalendarEventId = event.id
+        calendarTitle = event.title
+        calendarDate =
+                start.format(
+                        DateTimeFormatter.ofPattern("dd/MM/yyyy")
+                )
+        calendarTime =
+                start.format(
+                        DateTimeFormatter.ofPattern("HH:mm")
+                )
+        calendarLocation = event.location.orEmpty()
+        calendarError = null
+    }
 
     fun loadCalendar() {
         scope.launch {
             calendarLoading = true
             calendarError = null
+
             try {
-                calendarEvents = withContext(Dispatchers.IO) { fetchCalendarEvents() }
+                calendarEvents =
+                        withContext(Dispatchers.IO) {
+                            fetchCalendarEvents()
+                        }
             } catch (_: Exception) {
                 calendarError =
                         "No se ha podido conectar con el Core. Arráncalo y vuelve a intentarlo."
@@ -515,39 +721,191 @@ fun App() {
     }
 
     fun saveCalendarEvent() {
+
         if (calendarTitle.isBlank()) {
             calendarError = "Escribe un título para el evento."
             return
         }
 
+        val startAt =
+                try {
+                    calendarStartAt(
+                            calendarDate,
+                            calendarTime
+                    )
+                } catch (_: Exception) {
+                    calendarError =
+                            "La fecha o la hora no tienen un formato válido."
+                    return
+                }
+
+        val eventId = editingCalendarEventId
+
         scope.launch {
             calendarLoading = true
             calendarError = null
+
             try {
-                val created =
-                        withContext(Dispatchers.IO) {
-                            createCalendarEvent(
-                                    CreateCalendarEventDto(
-                                            title = calendarTitle.trim(),
-                                            startAt = calendarStartAt(calendarDate, calendarTime),
-                                            location = calendarLocation.trim().ifBlank { null }
-                                    )
-                            )
+
+                if (eventId == null) {
+
+                    val created =
+                            withContext(Dispatchers.IO) {
+                                createCalendarEvent(
+                                        CreateCalendarEventDto(
+                                                title = calendarTitle.trim(),
+                                                startAt = startAt,
+                                                location =
+                                                        calendarLocation
+                                                                .trim()
+                                                                .ifBlank {
+                                                                    null
+                                                                }
+                                        )
+                                )
+                            }
+
+                    calendarEvents =
+                            (calendarEvents + created)
+                                    .sortedBy {
+                                        it.startAt
+                                    }
+
+                } else {
+
+                    val updated =
+                            withContext(Dispatchers.IO) {
+                                updateCalendarEvent(
+                                        eventId = eventId,
+                                        event =
+                                                UpdateCalendarEventDto(
+                                                        title =
+                                                                calendarTitle
+                                                                        .trim(),
+                                                        startAt = startAt,
+                                                        location =
+                                                                calendarLocation
+                                                                        .trim()
+                                                                        .ifBlank {
+                                                                            null
+                                                                        }
+                                                )
+                                )
+                            }
+
+                    calendarEvents =
+                            calendarEvents
+                                    .map {
+                                        if (it.id == updated.id) {
+                                            updated
+                                        } else {
+                                            it
+                                        }
+                                    }
+                                    .sortedBy {
+                                        it.startAt
+                                    }
+                }
+
+                resetCalendarForm()
+
+            } catch (e: Exception) {
+
+                calendarError =
+                        if (e.message.isNullOrBlank()) {
+                            if (eventId == null) {
+                                "No se ha podido crear el evento."
+                            } else {
+                                "No se ha podido actualizar el evento."
+                            }
+                        } else {
+                            e.message
                         }
-                calendarEvents = (calendarEvents + created).sortedBy { it.startAt }
-                calendarTitle = ""
-                calendarLocation = ""
-                calendarDate = calendarDate()
-                calendarTime = calendarTime()
-            } catch (_: Exception) {
-                calendarError = "No se ha podido crear el evento."
+
             } finally {
                 calendarLoading = false
             }
         }
     }
 
-    LaunchedEffect(selectedSection) { if (selectedSection == "Calendario") loadCalendar() }
+    fun completeCalendarEventFromUi(event: CalendarEventDto) {
+
+        scope.launch {
+            calendarLoading = true
+            calendarError = null
+
+            try {
+
+                val completed =
+                        withContext(Dispatchers.IO) {
+                            completeCalendarEvent(event.id)
+                        }
+
+                calendarEvents =
+                        calendarEvents
+                                .map {
+                                    if (it.id == completed.id) {
+                                        completed
+                                    } else {
+                                        it
+                                    }
+                                }
+                                .sortedBy {
+                                    it.startAt
+                                }
+
+            } catch (e: Exception) {
+
+                calendarError =
+                        e.message
+                                ?: "No se ha podido completar el evento."
+
+            } finally {
+                calendarLoading = false
+            }
+        }
+    }
+
+    fun cancelCalendarEventFromUi(event: CalendarEventDto) {
+
+        scope.launch {
+            calendarLoading = true
+            calendarError = null
+
+            try {
+
+                withContext(Dispatchers.IO) {
+                    cancelCalendarEvent(event.id)
+                }
+
+                // La cancelación es lógica: el evento sigue existiendo
+                // en MySQL, pero ya no se muestra en el calendario.
+                calendarEvents =
+                        calendarEvents.filter {
+                            it.id != event.id
+                        }
+
+                if (editingCalendarEventId == event.id) {
+                    resetCalendarForm()
+                }
+
+            } catch (e: Exception) {
+
+                calendarError =
+                        e.message
+                                ?: "No se ha podido cancelar el evento."
+
+            } finally {
+                calendarLoading = false
+            }
+        }
+    }
+
+    LaunchedEffect(selectedSection) {
+        if (selectedSection == "Calendario") {
+            loadCalendar()
+        }
+    }
 
     // Controla la posición del scroll de la conversación.
     val chatListState = rememberLazyListState()
@@ -598,24 +956,42 @@ fun App() {
         scope.launch(Dispatchers.IO) {
             try {
 
-                val response = sendMessageToCore(conversationId, text)
+                val response =
+                        sendMessageToCore(
+                                conversationId,
+                                text
+                        )
 
                 val reply =
-                        response.reply ?: response.warning ?: "Apache no devolvió una respuesta."
+                        response.reply
+                                ?: response.warning
+                                ?: "Apache no devolvió una respuesta."
 
                 launch(Dispatchers.Main) {
                     conversationId = response.conversationId
                     SessionStore.saveConversationId(response.conversationId)
-                    messages = messages + ChatMessage(reply, false)
+
+                    messages =
+                            messages +
+                                    ChatMessage(
+                                            reply,
+                                            false
+                                    )
 
                     isLoading = false
                     showThinking = false
                 }
 
-                // Si el mensaje viene de una interacción por voz, Apache responde también hablando.
+                // Si el mensaje viene de una interacción por voz,
+                // Apache responde también hablando.
                 if (speak) {
-                    speakReply(reply, audioPlayer, isMuted)
+                    speakReply(
+                            reply,
+                            audioPlayer,
+                            isMuted
+                    )
                 }
+
             } catch (e: Exception) {
 
                 launch(Dispatchers.Main) {
@@ -632,19 +1008,27 @@ fun App() {
             }
         }
     }
+
     fun processRecordedAudio(audio: ByteArray) {
 
         scope.launch(Dispatchers.IO) {
             try {
 
-                val transcription = transcribeAudio(audio)
+                val transcription =
+                        transcribeAudio(audio)
 
-                val text = transcription.text.trim()
+                val text =
+                        transcription.text.trim()
 
                 launch(Dispatchers.Main) {
+
                     if (text.isNotBlank()) {
 
-                        processMessage(text, speak = true)
+                        processMessage(
+                                text,
+                                speak = true
+                        )
+
                     } else {
 
                         messages =
@@ -655,9 +1039,11 @@ fun App() {
                                         )
                     }
                 }
+
             } catch (e: Exception) {
 
                 launch(Dispatchers.Main) {
+
                     messages =
                             messages +
                                     ChatMessage(
@@ -668,24 +1054,31 @@ fun App() {
             }
         }
     }
+
     // Inicia o detiene la grabación del micrófono.
     fun toggleRecording() {
 
         if (isRecording) {
 
             scope.launch(Dispatchers.IO) {
+
                 try {
 
-                    val audio = microphoneRecorder.stop()
+                    val audio =
+                            microphoneRecorder.stop()
 
-                    launch(Dispatchers.Main) { isRecording = false }
+                    launch(Dispatchers.Main) {
+                        isRecording = false
+                    }
 
                     if (audio.isNotEmpty()) {
                         processRecordedAudio(audio)
                     }
+
                 } catch (e: Exception) {
 
                     launch(Dispatchers.Main) {
+
                         isRecording = false
 
                         messages =
@@ -704,16 +1097,22 @@ fun App() {
         isRecording = true
 
         scope.launch(Dispatchers.IO) {
+
             try {
 
                 microphoneRecorder.start { audio ->
-                    scope.launch(Dispatchers.Main) { isRecording = false }
+
+                    scope.launch(Dispatchers.Main) {
+                        isRecording = false
+                    }
 
                     processRecordedAudio(audio)
                 }
+
             } catch (e: Exception) {
 
                 launch(Dispatchers.Main) {
+
                     isRecording = false
 
                     messages =
@@ -726,48 +1125,83 @@ fun App() {
             }
         }
     }
+
     // Activa o desactiva el modo escucha (wake word "Apache").
     fun toggleListenMode() {
         listenModeEnabled = !listenModeEnabled
     }
 
     /**
-     * Ejecuta un turno completo de voz: manda el texto ya transcrito al Core (mismo Agent que el
-     * chat de texto), muestra la respuesta y la reproduce por los altavoces (TTS).
+     * Ejecuta un turno completo de voz: manda el texto ya transcrito al Core
+     * (mismo Agent que el chat de texto), muestra la respuesta y la reproduce
+     * por los altavoces (TTS).
      *
-     * Es una función suspend que no termina hasta que la respuesta se ha mostrado y se ha terminado
-     * de reproducir por voz, para poder encadenar turnos del modo escucha sin que Apache se grabe a
-     * sí mismo mientras habla.
+     * Es una función suspend que no termina hasta que la respuesta se ha mostrado
+     * y se ha terminado de reproducir por voz, para poder encadenar turnos del
+     * modo escucha sin que Apache se grabe a sí mismo mientras habla.
      */
     suspend fun runVoiceTurn(text: String) {
 
         withContext(Dispatchers.Main) {
-            messages = messages + ChatMessage(text, true)
+            messages =
+                    messages +
+                            ChatMessage(
+                                    text,
+                                    true
+                            )
+
             isLoading = true
         }
 
         try {
-            val response = sendMessageToCore(conversationId, text)
 
-            val reply = response.reply ?: response.warning ?: "Apache no devolvió una respuesta."
+            val response =
+                    sendMessageToCore(
+                            conversationId,
+                            text
+                    )
+
+            val reply =
+                    response.reply
+                            ?: response.warning
+                            ?: "Apache no devolvió una respuesta."
 
             withContext(Dispatchers.Main) {
-                conversationId = response.conversationId
-                SessionStore.saveConversationId(response.conversationId)
-                messages = messages + ChatMessage(reply, false)
+
+                conversationId =
+                        response.conversationId
+
+                SessionStore.saveConversationId(
+                        response.conversationId
+                )
+
+                messages =
+                        messages +
+                                ChatMessage(
+                                        reply,
+                                        false
+                                )
+
                 isLoading = false
             }
 
-            speakReply(reply, audioPlayer, isMuted)
+            speakReply(
+                    reply,
+                    audioPlayer,
+                    isMuted
+            )
+
         } catch (e: Exception) {
 
             withContext(Dispatchers.Main) {
+
                 messages =
                         messages +
                                 ChatMessage(
                                         "No puedo conectar con Apache Core: ${e.message}",
                                         false
                                 )
+
                 isLoading = false
             }
         }
@@ -775,50 +1209,73 @@ fun App() {
 
     /** Desactiva la escucha mediante una orden local, sin enviarla al Agent. */
     suspend fun stopListeningByVoice() {
+
         withContext(Dispatchers.Main) {
+
             listenModeEnabled = false
-            messages = messages + ChatMessage("Modo escucha desactivado.", false)
+
+            messages =
+                    messages +
+                            ChatMessage(
+                                    "Modo escucha desactivado.",
+                                    false
+                            )
         }
 
-        speakReply("Modo escucha desactivado.", audioPlayer, isMuted)
+        speakReply(
+                "Modo escucha desactivado.",
+                audioPlayer,
+                isMuted
+        )
     }
 
     /**
      * Escucha en segundo plano hasta detectar la palabra de activación "Apache".
      *
-     * Cada captura termina tras un segundo de silencio, se transcribe y se comprueba si contiene
-     * "Apache". Si el usuario ha dicho el comando en la misma frase ("Apache, abre Discord"), se
-     * procesa directamente. Si solo ha dicho "Apache", se vuelve a llamar a esta misma función con
-     * [awaitingCommand] = true para grabar el comando a continuación, tratando toda la siguiente
-     * grabación como el comando.
-     *
-     * Es una única función auto-recursiva (en vez de dos funciones que se llaman entre sí) para
-     * evitar referencias hacia adelante entre funciones locales, que Kotlin no permite.
+     * Cada captura termina tras un segundo de silencio, se transcribe y se comprueba
+     * si contiene "Apache".
      */
-    fun startPassiveListening(awaitingCommand: Boolean = false) {
+    fun startPassiveListening(
+            awaitingCommand: Boolean = false
+    ) {
 
         if (!listenModeEnabled) {
             return
         }
 
         microphoneRecorder.start { audio ->
+
             scope.launch(Dispatchers.IO) {
+
                 if (audio.isEmpty()) {
-                    if (listenModeEnabled) startPassiveListening(awaitingCommand)
+
+                    if (listenModeEnabled) {
+                        startPassiveListening(
+                                awaitingCommand
+                        )
+                    }
+
                     return@launch
                 }
 
                 try {
-                    val transcription = transcribeAudio(audio)
-                    val transcript = transcription.text.trim()
+
+                    val transcription =
+                            transcribeAudio(audio)
+
+                    val transcript =
+                            transcription.text.trim()
 
                     if (awaitingCommand) {
 
-                        // Ya se detectó "Apache" antes: esta grabación es directamente el comando.
                         if (transcript.isNotBlank()) {
+
                             if (stopListeningRegex.matches(transcript)) {
+
                                 stopListeningByVoice()
+
                             } else {
+
                                 runVoiceTurn(transcript)
                             }
                         }
@@ -826,27 +1283,40 @@ fun App() {
                         if (listenModeEnabled) {
                             startPassiveListening()
                         }
+
                     } else {
 
-                        val match = wakeWordRegex.find(transcript)
+                        val match =
+                                wakeWordRegex.find(transcript)
 
                         if (match == null) {
 
-                            // No se ha dicho "Apache": descartamos el audio y seguimos escuchando.
-                            if (listenModeEnabled) startPassiveListening()
+                            if (listenModeEnabled) {
+                                startPassiveListening()
+                            }
+
                             return@launch
                         }
 
                         val command =
                                 transcript
-                                        .substring(match.range.last + 1)
+                                        .substring(
+                                                match.range.last + 1
+                                        )
                                         .trim()
-                                        .trimStart(',', '.', ':', ';', '-')
+                                        .trimStart(
+                                                ',',
+                                                '.',
+                                                ':',
+                                                ';',
+                                                '-'
+                                        )
                                         .trim()
 
                         if (stopListeningRegex.matches(transcript)) {
 
                             stopListeningByVoice()
+
                         } else if (command.isNotBlank()) {
 
                             runVoiceTurn(command)
@@ -854,17 +1324,22 @@ fun App() {
                             if (listenModeEnabled) {
                                 startPassiveListening()
                             }
+
                         } else {
 
-                            // Solo se ha dicho "Apache": grabamos el comando por separado.
-                            startPassiveListening(awaitingCommand = true)
+                            startPassiveListening(
+                                    awaitingCommand = true
+                            )
                         }
                     }
+
                 } catch (_: Exception) {
 
-                    // Ignoramos errores puntuales de la escucha pasiva (ruido, silencio, etc.)
-                    // y seguimos escuchando en segundo plano.
-                    if (listenModeEnabled) startPassiveListening(awaitingCommand)
+                    if (listenModeEnabled) {
+                        startPassiveListening(
+                                awaitingCommand
+                        )
+                    }
                 }
             }
         }
@@ -872,17 +1347,24 @@ fun App() {
 
     // Inicia o detiene el bucle de escucha pasiva en cuanto cambia el modo escucha.
     LaunchedEffect(listenModeEnabled) {
+
         if (listenModeEnabled) {
+
             startPassiveListening()
+
         } else {
-            withContext(Dispatchers.IO) { microphoneRecorder.stop() }
+
+            withContext(Dispatchers.IO) {
+                microphoneRecorder.stop()
+            }
         }
     }
 
     // Función que envía el mensaje tanto desde el botón como desde Enter.
     fun sendMessage() {
 
-        val text = message.trim()
+        val text =
+                message.trim()
 
         if (text.isNotBlank() && !isLoading) {
 
@@ -895,19 +1377,42 @@ fun App() {
     /** Dibuja una burbuja de mensaje, alineada según su remitente. */
     @Composable
     fun MessageBubble(message: ChatMessage) {
+
         Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start
+                horizontalArrangement =
+                        if (message.isUser) {
+                            Arrangement.End
+                        } else {
+                            Arrangement.Start
+                        }
         ) {
+
             Surface(
-                    color = if (message.isUser) Color(0xFF1DB954) else Color(0xFF242424),
+                    color =
+                            if (message.isUser) {
+                                Color(0xFF1DB954)
+                            } else {
+                                Color(0xFF242424)
+                            },
                     shape = RoundedCornerShape(12.dp)
             ) {
+
                 SelectionContainer {
+
                     Text(
                             text = message.text,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                            color = if (message.isUser) Color.Black else Color.White,
+                            modifier =
+                                    Modifier.padding(
+                                            horizontal = 16.dp,
+                                            vertical = 10.dp
+                                    ),
+                            color =
+                                    if (message.isUser) {
+                                        Color.Black
+                                    } else {
+                                        Color.White
+                                    },
                             fontSize = 15.sp
                     )
                 }
@@ -918,11 +1423,20 @@ fun App() {
     MaterialTheme {
 
         // Fondo principal de la aplicación.
-        Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF121212)) {
+        Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = Color(0xFF121212)
+        ) {
 
             // Layout principal: barra lateral + contenido.
-            Box(modifier = Modifier.fillMaxSize()) {
-                Row(modifier = Modifier.fillMaxSize()) {
+            Box(
+                    modifier = Modifier.fillMaxSize()
+            ) {
+
+                Row(
+                        modifier = Modifier.fillMaxSize()
+                ) {
+
                     // =========================================================
                     // BARRA LATERAL
                     // =========================================================
@@ -931,14 +1445,22 @@ fun App() {
                             modifier =
                                     Modifier.width(220.dp)
                                             .fillMaxHeight()
-                                            .background(Color(0xFF181818))
+                                            .background(
+                                                    Color(0xFF181818)
+                                            )
                                             .padding(20.dp)
                     ) {
 
                         // Nombre de Apache.
-                        Text(text = "APACHE", color = Color(0xFF1DB954), fontSize = 24.sp)
+                        Text(
+                                text = "APACHE",
+                                color = Color(0xFF1DB954),
+                                fontSize = 24.sp
+                        )
 
-                        Spacer(modifier = Modifier.height(30.dp))
+                        Spacer(
+                                modifier = Modifier.height(30.dp)
+                        )
 
                         // Sección Chat.
                         Text(
@@ -950,10 +1472,15 @@ fun App() {
                                             Color(0xFFAAAAAA)
                                         },
                                 fontSize = 16.sp,
-                                modifier = Modifier.clickable { selectedSection = "Chat" }
+                                modifier =
+                                        Modifier.clickable {
+                                            selectedSection = "Chat"
+                                        }
                         )
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(
+                                modifier = Modifier.height(16.dp)
+                        )
 
                         Text(
                                 text = "Calendario",
@@ -964,10 +1491,15 @@ fun App() {
                                             Color(0xFFAAAAAA)
                                         },
                                 fontSize = 16.sp,
-                                modifier = Modifier.clickable { selectedSection = "Calendario" }
+                                modifier =
+                                        Modifier.clickable {
+                                            selectedSection = "Calendario"
+                                        }
                         )
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(
+                                modifier = Modifier.height(16.dp)
+                        )
 
                         // Sección Memoria.
                         Text(
@@ -979,10 +1511,15 @@ fun App() {
                                             Color(0xFFAAAAAA)
                                         },
                                 fontSize = 16.sp,
-                                modifier = Modifier.clickable { selectedSection = "Memoria" }
+                                modifier =
+                                        Modifier.clickable {
+                                            selectedSection = "Memoria"
+                                        }
                         )
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(
+                                modifier = Modifier.height(16.dp)
+                        )
 
                         // Sección Ayuda.
                         Text(
@@ -994,14 +1531,23 @@ fun App() {
                                             Color(0xFFAAAAAA)
                                         },
                                 fontSize = 16.sp,
-                                modifier = Modifier.clickable { selectedSection = "Ayuda" }
+                                modifier =
+                                        Modifier.clickable {
+                                            selectedSection = "Ayuda"
+                                        }
                         )
 
                         // Empuja la versión hacia la parte inferior.
-                        Spacer(modifier = Modifier.weight(1f))
+                        Spacer(
+                                modifier = Modifier.weight(1f)
+                        )
 
                         // Versión actual de Apache.
-                        Text(text = "Apache 0.1.0", color = Color(0xFF666666), fontSize = 12.sp)
+                        Text(
+                                text = "Apache 0.1.0",
+                                color = Color(0xFF666666),
+                                fontSize = 12.sp
+                        )
                     }
 
                     // =========================================================
@@ -1017,30 +1563,59 @@ fun App() {
                         "Chat" -> {
 
                             // Zona principal del chat.
-                            Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+                            Column(
+                                    modifier =
+                                            Modifier.fillMaxSize()
+                                                    .padding(24.dp)
+                            ) {
 
                                 // Título + botón de silenciar la voz de Apache.
                                 Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                        modifier =
+                                                Modifier.fillMaxWidth(),
+                                        horizontalArrangement =
+                                                Arrangement.SpaceBetween,
+                                        verticalAlignment =
+                                                Alignment.CenterVertically
                                 ) {
-                                    Text(text = "Asistente", color = Color.White, fontSize = 22.sp)
+
+                                    Text(
+                                            text = "Asistente",
+                                            color = Color.White,
+                                            fontSize = 22.sp
+                                    )
 
                                     Surface(
                                             color =
-                                                    if (isMuted) Color(0xFF3A2020)
-                                                    else Color(0xFF1E2A22),
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier.clickable { isMuted = !isMuted }
+                                                    if (isMuted) {
+                                                        Color(0xFF3A2020)
+                                                    } else {
+                                                        Color(0xFF1E2A22)
+                                                    },
+                                            shape =
+                                                    RoundedCornerShape(
+                                                            8.dp
+                                                    ),
+                                            modifier =
+                                                    Modifier.clickable {
+                                                        isMuted =
+                                                                !isMuted
+                                                    }
                                     ) {
+
                                         Text(
                                                 text =
-                                                        if (isMuted) "🔇 Voz silenciada"
-                                                        else "🔊 Voz activada",
+                                                        if (isMuted) {
+                                                            "🔇 Voz silenciada"
+                                                        } else {
+                                                            "🔊 Voz activada"
+                                                        },
                                                 color =
-                                                        if (isMuted) Color(0xFFE5A0A0)
-                                                        else Color(0xFFA7E8BE),
+                                                        if (isMuted) {
+                                                            Color(0xFFE5A0A0)
+                                                        } else {
+                                                            Color(0xFFA7E8BE)
+                                                        },
                                                 fontSize = 13.sp,
                                                 modifier =
                                                         Modifier.padding(
@@ -1051,7 +1626,9 @@ fun App() {
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(20.dp))
+                                Spacer(
+                                        modifier = Modifier.height(20.dp)
+                                )
 
                                 // =====================================================
                                 // CONVERSACIÓN
@@ -1059,37 +1636,67 @@ fun App() {
 
                                 LazyColumn(
                                         state = chatListState,
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                        modifier =
+                                                Modifier.weight(1f),
+                                        verticalArrangement =
+                                                Arrangement.spacedBy(12.dp)
                                 ) {
 
-                                    // Dibujamos todos los mensajes.
-                                    items(messages) { chatMessage -> MessageBubble(chatMessage) }
+                                    items(messages) {
+                                        chatMessage ->
+                                        MessageBubble(
+                                                chatMessage
+                                        )
+                                    }
 
-                                    // Mientras esperamos al Core mostramos esto.
                                     if (showThinking) {
-                                        item { MessageBubble(ChatMessage("Pensando...", false)) }
+
+                                        item {
+
+                                            MessageBubble(
+                                                    ChatMessage(
+                                                            "Pensando...",
+                                                            false
+                                                    )
+                                            )
+                                        }
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(16.dp))
+                                Spacer(
+                                        modifier = Modifier.height(16.dp)
+                                )
 
                                 if (listenModeEnabled) {
+
                                     Surface(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            color = Color(0xFF173D29),
-                                            shape = RoundedCornerShape(10.dp)
+                                            modifier =
+                                                    Modifier.fillMaxWidth(),
+                                            color =
+                                                    Color(0xFF173D29),
+                                            shape =
+                                                    RoundedCornerShape(
+                                                            10.dp
+                                                    )
                                     ) {
+
                                         Text(
                                                 text =
                                                         "Escucha continua activa · Di «Apache, apaga» para detenerla",
-                                                modifier = Modifier.padding(12.dp),
-                                                color = Color(0xFFA7E8BE),
+                                                modifier =
+                                                        Modifier.padding(
+                                                                12.dp
+                                                        ),
+                                                color =
+                                                        Color(0xFFA7E8BE),
                                                 fontSize = 14.sp
                                         )
                                     }
 
-                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Spacer(
+                                            modifier =
+                                                    Modifier.height(10.dp)
+                                    )
                                 }
 
                                 // =====================================================
@@ -1097,32 +1704,51 @@ fun App() {
                                 // =====================================================
 
                                 Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically
+                                        modifier =
+                                                Modifier.fillMaxWidth(),
+                                        verticalAlignment =
+                                                Alignment.CenterVertically
                                 ) {
 
-                                    // Campo donde escribe el usuario.
                                     OutlinedTextField(
                                             value = message,
-                                            onValueChange = { message = it },
-                                            modifier = Modifier.weight(1f),
+                                            onValueChange = {
+                                                message = it
+                                            },
+                                            modifier =
+                                                    Modifier.weight(1f),
                                             keyboardOptions =
-                                                    KeyboardOptions(imeAction = ImeAction.Send),
+                                                    KeyboardOptions(
+                                                            imeAction =
+                                                                    ImeAction.Send
+                                                    ),
                                             keyboardActions =
-                                                    KeyboardActions(onSend = { sendMessage() }),
-                                            placeholder = { Text("Escribe un mensaje...") },
+                                                    KeyboardActions(
+                                                            onSend = {
+                                                                sendMessage()
+                                                            }
+                                                    ),
+                                            placeholder = {
+                                                Text(
+                                                        "Escribe un mensaje..."
+                                                )
+                                            },
                                             singleLine = true,
-
-                                            // Desactivamos el campo mientras Apache piensa.
-                                            enabled = !isLoading && !isRecording,
+                                            enabled =
+                                                    !isLoading &&
+                                                            !isRecording,
                                             colors =
                                                     OutlinedTextFieldDefaults.colors(
-                                                            focusedTextColor = Color.White,
-                                                            unfocusedTextColor = Color.White,
-                                                            focusedBorderColor = Color(0xFF1DB954),
+                                                            focusedTextColor =
+                                                                    Color.White,
+                                                            unfocusedTextColor =
+                                                                    Color.White,
+                                                            focusedBorderColor =
+                                                                    Color(0xFF1DB954),
                                                             unfocusedBorderColor =
                                                                     Color(0xFF444444),
-                                                            cursorColor = Color(0xFF1DB954),
+                                                            cursorColor =
+                                                                    Color(0xFF1DB954),
                                                             focusedPlaceholderColor =
                                                                     Color(0xFF777777),
                                                             unfocusedPlaceholderColor =
@@ -1130,19 +1756,21 @@ fun App() {
                                                     )
                                     )
 
-                                    Spacer(modifier = Modifier.width(10.dp))
-
-                                    // =================================================
-                                    // BOTÓN DE MODO ESCUCHA (wake word)
-                                    // =================================================
+                                    Spacer(
+                                            modifier =
+                                                    Modifier.width(10.dp)
+                                    )
 
                                     Button(
-                                            // Debe seguir disponible mientras Apache responde para
-                                            // poder cortar la escucha en cualquier momento.
                                             enabled =
                                                     !isRecording &&
-                                                            (listenModeEnabled || !isLoading),
-                                            onClick = { toggleListenMode() },
+                                                            (
+                                                                    listenModeEnabled ||
+                                                                            !isLoading
+                                                            ),
+                                            onClick = {
+                                                toggleListenMode()
+                                            },
                                             colors =
                                                     ButtonDefaults.buttonColors(
                                                             containerColor =
@@ -1151,9 +1779,11 @@ fun App() {
                                                                     } else {
                                                                         Color(0xFF1DB954)
                                                                     },
-                                                            contentColor = Color.Black
+                                                            contentColor =
+                                                                    Color.Black
                                                     )
                                     ) {
+
                                         Text(
                                                 text =
                                                         if (listenModeEnabled) {
@@ -1164,15 +1794,18 @@ fun App() {
                                         )
                                     }
 
-                                    Spacer(modifier = Modifier.width(10.dp))
-
-                                    // =================================================
-                                    // BOTÓN DE VOZ
-                                    // =================================================
+                                    Spacer(
+                                            modifier =
+                                                    Modifier.width(10.dp)
+                                    )
 
                                     Button(
-                                            enabled = !isLoading && !listenModeEnabled,
-                                            onClick = { toggleRecording() },
+                                            enabled =
+                                                    !isLoading &&
+                                                            !listenModeEnabled,
+                                            onClick = {
+                                                toggleRecording()
+                                            },
                                             colors =
                                                     ButtonDefaults.buttonColors(
                                                             containerColor =
@@ -1183,6 +1816,7 @@ fun App() {
                                                                     }
                                                     )
                                     ) {
+
                                         Text(
                                                 text =
                                                         if (isRecording) {
@@ -1194,194 +1828,666 @@ fun App() {
                                         )
                                     }
 
-                                    Spacer(modifier = Modifier.width(10.dp))
-
-                                    // =================================================
-                                    // BOTÓN ENVIAR
-                                    // =================================================
+                                    Spacer(
+                                            modifier =
+                                                    Modifier.width(10.dp)
+                                    )
 
                                     Button(
-                                            // Desactivamos el botón mientras esperamos.
-                                            enabled = !isLoading && !isRecording,
-
-                                            // Utilizamos la misma función que Enter.
-                                            onClick = { sendMessage() },
-
-                                            // Color verde de Apache.
+                                            enabled =
+                                                    !isLoading &&
+                                                            !isRecording,
+                                            onClick = {
+                                                sendMessage()
+                                            },
                                             colors =
                                                     ButtonDefaults.buttonColors(
-                                                            containerColor = Color(0xFF1DB954)
+                                                            containerColor =
+                                                                    Color(0xFF1DB954)
                                                     )
-                                    ) { Text(text = "Enviar", color = Color.Black) }
+                                    ) {
+
+                                        Text(
+                                                text = "Enviar",
+                                                color = Color.Black
+                                        )
+                                    }
                                 }
                             }
                         }
+
+                        // =====================================================
+                        // CALENDARIO
+                        // =====================================================
+
                         "Calendario" -> {
+
                             Column(
                                     modifier =
                                             Modifier.fillMaxSize()
-                                                    .verticalScroll(rememberScrollState())
+                                                    .verticalScroll(
+                                                            rememberScrollState()
+                                                    )
                                                     .padding(28.dp)
                             ) {
+
                                 Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                        modifier =
+                                                Modifier.fillMaxWidth(),
+                                        verticalAlignment =
+                                                Alignment.CenterVertically,
+                                        horizontalArrangement =
+                                                Arrangement.SpaceBetween
                                 ) {
+
                                     Column {
+
                                         Text(
                                                 text = "Calendario",
                                                 color = Color.White,
                                                 fontSize = 26.sp
                                         )
-                                        Spacer(modifier = Modifier.height(4.dp))
+
+                                        Spacer(
+                                                modifier =
+                                                        Modifier.height(4.dp)
+                                        )
+
                                         Text(
                                                 text = "Tus próximos 30 días",
-                                                color = Color(0xFF9AA5A0),
+                                                color =
+                                                        Color(0xFF9AA5A0),
                                                 fontSize = 14.sp
                                         )
                                     }
-                                    TextButton(
-                                            onClick = { loadCalendar() },
-                                            enabled = !calendarLoading
-                                    ) { Text("Actualizar", color = Color(0xFF6FE19A)) }
-                                }
 
-                                Spacer(modifier = Modifier.height(24.dp))
-
-                                Surface(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = Color(0xFF1D2923),
-                                        shape = RoundedCornerShape(16.dp)
-                                ) {
-                                    Column(modifier = Modifier.padding(20.dp)) {
-                                        Text(
-                                                text = "Nuevo evento",
-                                                color = Color.White,
-                                                fontSize = 18.sp
-                                        )
-                                        Spacer(modifier = Modifier.height(14.dp))
-                                        OutlinedTextField(
-                                                value = calendarTitle,
-                                                onValueChange = { calendarTitle = it },
-                                                modifier = Modifier.fillMaxWidth(),
-                                                label = { Text("Título") },
-                                                singleLine = true,
-                                                colors = calendarTextFieldColors()
-                                        )
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        Row(modifier = Modifier.fillMaxWidth()) {
-                                            OutlinedTextField(
-                                                    value = calendarDate,
-                                                    onValueChange = { calendarDate = it },
-                                                    modifier = Modifier.weight(1f),
-                                                    label = { Text("Fecha") },
-                                                    supportingText = { Text("Ej.: 12/09/2026") },
-                                                    singleLine = true,
-                                                    colors = calendarTextFieldColors()
-                                            )
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            OutlinedTextField(
-                                                    value = calendarTime,
-                                                    onValueChange = { calendarTime = it },
-                                                    modifier = Modifier.width(130.dp),
-                                                    label = { Text("Hora") },
-                                                    supportingText = { Text("Ej.: 18:30") },
-                                                    singleLine = true,
-                                                    colors = calendarTextFieldColors()
-                                            )
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            OutlinedTextField(
-                                                    value = calendarLocation,
-                                                    onValueChange = { calendarLocation = it },
-                                                    modifier = Modifier.weight(1f),
-                                                    label = { Text("Lugar (opcional)") },
-                                                    singleLine = true,
-                                                    colors = calendarTextFieldColors()
+                                    Row(
+                                            verticalAlignment =
+                                                    Alignment.CenterVertically
+                                    ) {
+                                        TextButton(
+                                                onClick = {
+                                                    showCompletedArchive = true
+                                                }
+                                        ) {
+                                            Text(
+                                                    "Archivo",
+                                                    color =
+                                                            Color(0xFF6FE19A)
                                             )
                                         }
-                                        Spacer(modifier = Modifier.height(14.dp))
+
+                                        TextButton(
+                                                onClick = {
+                                                    loadCalendar()
+                                                },
+                                                enabled =
+                                                        !calendarLoading
+                                        ) {
+                                            Text(
+                                                    "Actualizar",
+                                                    color =
+                                                            Color(0xFF6FE19A)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(24.dp)
+                                )
+
+                                // =================================================
+                                // FORMULARIO DE EVENTO
+                                // =================================================
+
+                                Surface(
+                                        modifier =
+                                                Modifier.fillMaxWidth(),
+                                        color =
+                                                Color(0xFF1D2923),
+                                        shape =
+                                                RoundedCornerShape(
+                                                        16.dp
+                                                )
+                                ) {
+
+                                    Column(
+                                            modifier =
+                                                    Modifier.padding(
+                                                            20.dp
+                                                    )
+                                    ) {
+
+                                        Row(
+                                                modifier =
+                                                        Modifier.fillMaxWidth(),
+                                                verticalAlignment =
+                                                        Alignment.CenterVertically,
+                                                horizontalArrangement =
+                                                        Arrangement.SpaceBetween
+                                        ) {
+
+                                            Text(
+                                                    text =
+                                                            if (editingCalendarEventId == null) {
+                                                                "Nuevo evento"
+                                                            } else {
+                                                                "Editar evento"
+                                                            },
+                                                    color =
+                                                            Color.White,
+                                                    fontSize = 18.sp
+                                            )
+
+                                            if (editingCalendarEventId != null) {
+
+                                                TextButton(
+                                                        onClick = {
+                                                            resetCalendarForm()
+                                                            calendarError =
+                                                                    null
+                                                        }
+                                                ) {
+
+                                                    Text(
+                                                            text =
+                                                                    "Cancelar edición",
+                                                            color =
+                                                                    Color(
+                                                                            0xFFFFB5B5
+                                                                    )
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Spacer(
+                                                modifier =
+                                                        Modifier.height(
+                                                                14.dp
+                                                        )
+                                        )
+
+                                        OutlinedTextField(
+                                                value =
+                                                        calendarTitle,
+                                                onValueChange = {
+                                                    calendarTitle = it
+                                                },
+                                                modifier =
+                                                        Modifier.fillMaxWidth(),
+                                                label = {
+                                                    Text("Título")
+                                                },
+                                                singleLine = true,
+                                                colors =
+                                                        calendarTextFieldColors()
+                                        )
+
+                                        Spacer(
+                                                modifier =
+                                                        Modifier.height(
+                                                                10.dp
+                                                        )
+                                        )
+
+                                        Row(
+                                                modifier =
+                                                        Modifier.fillMaxWidth()
+                                        ) {
+
+                                            OutlinedTextField(
+                                                    value =
+                                                            calendarDate,
+                                                    onValueChange = {
+                                                        calendarDate = it
+                                                    },
+                                                    modifier =
+                                                            Modifier.weight(
+                                                                    1f
+                                                            ),
+                                                    label = {
+                                                        Text("Fecha")
+                                                    },
+                                                    supportingText = {
+                                                        Text(
+                                                                "Ej.: 12/09/2026"
+                                                        )
+                                                    },
+                                                    singleLine = true,
+                                                    colors =
+                                                            calendarTextFieldColors()
+                                            )
+
+                                            Spacer(
+                                                    modifier =
+                                                            Modifier.width(
+                                                                    12.dp
+                                                            )
+                                            )
+
+                                            OutlinedTextField(
+                                                    value =
+                                                            calendarTime,
+                                                    onValueChange = {
+                                                        calendarTime = it
+                                                    },
+                                                    modifier =
+                                                            Modifier.width(
+                                                                    130.dp
+                                                            ),
+                                                    label = {
+                                                        Text("Hora")
+                                                    },
+                                                    supportingText = {
+                                                        Text(
+                                                                "Ej.: 18:30"
+                                                        )
+                                                    },
+                                                    singleLine = true,
+                                                    colors =
+                                                            calendarTextFieldColors()
+                                            )
+
+                                            Spacer(
+                                                    modifier =
+                                                            Modifier.width(
+                                                                    12.dp
+                                                            )
+                                            )
+
+                                            OutlinedTextField(
+                                                    value =
+                                                            calendarLocation,
+                                                    onValueChange = {
+                                                        calendarLocation =
+                                                                it
+                                                    },
+                                                    modifier =
+                                                            Modifier.weight(
+                                                                    1f
+                                                            ),
+                                                    label = {
+                                                        Text(
+                                                                "Lugar (opcional)"
+                                                        )
+                                                    },
+                                                    singleLine = true,
+                                                    colors =
+                                                            calendarTextFieldColors()
+                                            )
+                                        }
+
+                                        Spacer(
+                                                modifier =
+                                                        Modifier.height(
+                                                                14.dp
+                                                        )
+                                        )
+
                                         Button(
-                                                onClick = { saveCalendarEvent() },
-                                                enabled = !calendarLoading,
+                                                onClick = {
+                                                    saveCalendarEvent()
+                                                },
+                                                enabled =
+                                                        !calendarLoading,
                                                 colors =
                                                         ButtonDefaults.buttonColors(
-                                                                containerColor = Color(0xFF1DB954),
-                                                                contentColor = Color.Black
+                                                                containerColor =
+                                                                        Color(
+                                                                                0xFF1DB954
+                                                                        ),
+                                                                contentColor =
+                                                                        Color.Black
                                                         )
-                                        ) { Text("Añadir al calendario") }
+                                        ) {
+
+                                            Text(
+                                                    if (editingCalendarEventId == null) {
+                                                        "Añadir al calendario"
+                                                    } else {
+                                                        "Guardar cambios"
+                                                    }
+                                            )
+                                        }
                                     }
                                 }
 
                                 calendarError?.let { error ->
-                                    Spacer(modifier = Modifier.height(14.dp))
-                                    Text(text = error, color = Color(0xFFFF9B9B), fontSize = 14.sp)
+
+                                    Spacer(
+                                            modifier =
+                                                    Modifier.height(
+                                                            14.dp
+                                                    )
+                                    )
+
+                                    Text(
+                                            text = error,
+                                            color =
+                                                    Color(0xFFFF9B9B),
+                                            fontSize = 14.sp
+                                    )
                                 }
 
-                                Spacer(modifier = Modifier.height(26.dp))
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(26.dp)
+                                )
+
                                 Text(
                                         text = "Próximos eventos",
                                         color = Color.White,
                                         fontSize = 19.sp
                                 )
-                                Spacer(modifier = Modifier.height(12.dp))
 
-                                if (calendarLoading && calendarEvents.isEmpty()) {
-                                    CircularProgressIndicator(color = Color(0xFF1DB954))
-                                } else if (calendarEvents.isEmpty()) {
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(12.dp)
+                                )
+
+                                val activeCalendarEvents =
+                                        calendarEvents
+                                                .filter {
+                                                    it.status != "completed" &&
+                                                            it.status != "cancelled"
+                                                }
+                                                .sortedBy {
+                                                    it.startAt
+                                                }
+
+                                if (
+                                        calendarLoading &&
+                                                activeCalendarEvents.isEmpty()
+                                ) {
+
+                                    CircularProgressIndicator(
+                                            color =
+                                                    Color(0xFF1DB954)
+                                    )
+
+                                } else if (activeCalendarEvents.isEmpty()) {
+
                                     Surface(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            color = Color(0xFF181F1B),
-                                            shape = RoundedCornerShape(14.dp)
+                                            modifier =
+                                                    Modifier.fillMaxWidth(),
+                                            color =
+                                                    Color(0xFF181F1B),
+                                            shape =
+                                                    RoundedCornerShape(
+                                                            14.dp
+                                                    )
                                     ) {
+
                                         Text(
                                                 text =
                                                         "No tienes eventos próximos. Crea el primero arriba.",
-                                                modifier = Modifier.padding(20.dp),
-                                                color = Color(0xFFB7C2BB)
+                                                modifier =
+                                                        Modifier.padding(
+                                                                20.dp
+                                                        ),
+                                                color =
+                                                        Color(0xFFB7C2BB)
                                         )
                                     }
+
                                 } else {
-                                    calendarEvents.forEach { event ->
+
+                                    activeCalendarEvents.forEach { event ->
+
+                                        val displayStatus =
+                                                calendarDisplayStatus(
+                                                        event
+                                                )
+
                                         Surface(
                                                 modifier =
                                                         Modifier.fillMaxWidth()
-                                                                .padding(bottom = 10.dp),
-                                                color = Color(0xFF202A24),
-                                                shape = RoundedCornerShape(14.dp)
-                                        ) {
-                                            Row(
-                                                    modifier = Modifier.padding(18.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Surface(
-                                                        color = Color(0xFF1DB954),
-                                                        shape = RoundedCornerShape(10.dp)
-                                                ) {
-                                                    Text(
-                                                            text =
-                                                                    event.startAt
-                                                                            .replace('T', ' ')
-                                                                            .take(16),
-                                                            modifier = Modifier.padding(10.dp),
-                                                            color = Color.Black,
-                                                            fontSize = 13.sp
-                                                    )
-                                                }
-                                                Spacer(modifier = Modifier.width(14.dp))
-                                                Column {
-                                                    Text(
-                                                            text = event.title,
-                                                            color = Color.White,
-                                                            fontSize = 16.sp
-                                                    )
-                                                    if (!event.location.isNullOrBlank()) {
-                                                        Spacer(modifier = Modifier.height(3.dp))
-                                                        Text(
-                                                                text = event.location,
-                                                                color = Color(0xFFAAC5B1),
-                                                                fontSize = 13.sp
+                                                                .padding(
+                                                                        bottom = 10.dp
+                                                                ),
+                                                color =
+                                                        Color(0xFF202A24),
+                                                shape =
+                                                        RoundedCornerShape(
+                                                                14.dp
                                                         )
+                                        ) {
+
+                                            Column(
+                                                    modifier =
+                                                            Modifier.padding(
+                                                                    18.dp
+                                                            )
+                                            ) {
+
+                                                Row(
+                                                        modifier =
+                                                                Modifier.fillMaxWidth(),
+                                                        verticalAlignment =
+                                                                Alignment.CenterVertically
+                                                ) {
+
+                                                    Surface(
+                                                            color =
+                                                                    if (displayStatus == "Atrasado") {
+                                                                        Color(
+                                                                                0xFF8A5A2B
+                                                                        )
+                                                                    } else {
+                                                                        Color(
+                                                                                0xFF1DB954
+                                                                        )
+                                                                    },
+                                                            shape =
+                                                                    RoundedCornerShape(
+                                                                            10.dp
+                                                                    )
+                                                    ) {
+
+                                                        Text(
+                                                                text =
+                                                                        event.startAt
+                                                                                .replace(
+                                                                                        'T',
+                                                                                        ' '
+                                                                                )
+                                                                                .take(
+                                                                                        16
+                                                                                ),
+                                                                modifier =
+                                                                        Modifier.padding(
+                                                                                10.dp
+                                                                        ),
+                                                                color =
+                                                                        Color.Black,
+                                                                fontSize =
+                                                                        13.sp
+                                                        )
+                                                    }
+
+                                                    Spacer(
+                                                            modifier =
+                                                                    Modifier.width(
+                                                                            14.dp
+                                                                    )
+                                                    )
+
+                                                    Column(
+                                                            modifier =
+                                                                    Modifier.weight(
+                                                                            1f
+                                                                    )
+                                                    ) {
+
+                                                        Text(
+                                                                text =
+                                                                        event.title,
+                                                                color =
+                                                                        Color.White,
+                                                                fontSize =
+                                                                        16.sp
+                                                        )
+
+                                                        if (!event.location.isNullOrBlank()) {
+
+                                                            Spacer(
+                                                                    modifier =
+                                                                            Modifier.height(
+                                                                                    3.dp
+                                                                            )
+                                                            )
+
+                                                            Text(
+                                                                    text =
+                                                                            event.location,
+                                                                    color =
+                                                                            Color(
+                                                                                    0xFFAAC5B1
+                                                                            ),
+                                                                    fontSize =
+                                                                            13.sp
+                                                            )
+                                                        }
+                                                    }
+
+                                                    Surface(
+                                                            color =
+                                                                    calendarStatusColor(
+                                                                            event
+                                                                    ),
+                                                            shape =
+                                                                    RoundedCornerShape(
+                                                                            20.dp
+                                                                    )
+                                                    ) {
+
+                                                        Text(
+                                                                text =
+                                                                        displayStatus,
+                                                                color =
+                                                                        calendarStatusTextColor(
+                                                                                event
+                                                                        ),
+                                                                fontSize =
+                                                                        12.sp,
+                                                                modifier =
+                                                                        Modifier.padding(
+                                                                                horizontal = 10.dp,
+                                                                                vertical = 6.dp
+                                                                        )
+                                                        )
+                                                    }
+                                                }
+
+                                                Spacer(
+                                                        modifier =
+                                                                Modifier.height(
+                                                                        14.dp
+                                                                )
+                                                )
+
+                                                HorizontalDivider(
+                                                        color =
+                                                                Color(
+                                                                        0xFF334039
+                                                                )
+                                                )
+
+                                                Spacer(
+                                                        modifier =
+                                                                Modifier.height(
+                                                                        10.dp
+                                                                )
+                                                )
+
+                                                Row(
+                                                        modifier =
+                                                                Modifier.fillMaxWidth(),
+                                                        horizontalArrangement =
+                                                                Arrangement.End,
+                                                        verticalAlignment =
+                                                                Alignment.CenterVertically
+                                                ) {
+
+                                                    TextButton(
+                                                            onClick = {
+                                                                beginEditCalendarEvent(
+                                                                        event
+                                                                )
+                                                            },
+                                                            enabled =
+                                                                    !calendarLoading
+                                                    ) {
+
+                                                        Text(
+                                                                text = "Editar",
+                                                                color =
+                                                                        Color(
+                                                                                0xFF6FE19A
+                                                                        )
+                                                        )
+                                                    }
+
+                                                    if (
+                                                            event.status !=
+                                                                    "completed"
+                                                    ) {
+
+                                                        Spacer(
+                                                                modifier =
+                                                                        Modifier.width(
+                                                                                4.dp
+                                                                        )
+                                                        )
+
+                                                        TextButton(
+                                                                onClick = {
+                                                                    completeCalendarEventFromUi(
+                                                                            event
+                                                                    )
+                                                                },
+                                                                enabled =
+                                                                        !calendarLoading
+                                                        ) {
+
+                                                            Text(
+                                                                    text =
+                                                                            "Completar",
+                                                                    color =
+                                                                            Color(
+                                                                                    0xFF9DE8B8
+                                                                            )
+                                                            )
+                                                        }
+
+                                                        Spacer(
+                                                                modifier =
+                                                                        Modifier.width(
+                                                                                4.dp
+                                                                        )
+                                                        )
+
+                                                        TextButton(
+                                                                onClick = {
+                                                                    calendarEventPendingCancellation =
+                                                                            event
+                                                                },
+                                                                enabled =
+                                                                        !calendarLoading
+                                                        ) {
+
+                                                            Text(
+                                                                    text =
+                                                                            "Cancelar",
+                                                                    color =
+                                                                            Color(
+                                                                                    0xFFFF9B9B
+                                                                            )
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1397,18 +2503,28 @@ fun App() {
 
                         "Memoria" -> {
 
-                            Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+                            Column(
+                                    modifier =
+                                            Modifier.fillMaxSize()
+                                                    .padding(24.dp)
+                            ) {
 
-                                // Título de la sección.
-                                Text(text = "Memoria", color = Color.White, fontSize = 22.sp)
+                                Text(
+                                        text = "Memoria",
+                                        color = Color.White,
+                                        fontSize = 22.sp
+                                )
 
-                                Spacer(modifier = Modifier.height(20.dp))
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(20.dp)
+                                )
 
-                                // Estado actual de la sección.
                                 Text(
                                         text =
                                                 "La memoria de Apache estará disponible próximamente.",
-                                        color = Color(0xFFAAAAAA),
+                                        color =
+                                                Color(0xFFAAAAAA),
                                         fontSize = 15.sp
                                 )
                             }
@@ -1423,32 +2539,47 @@ fun App() {
                             Column(
                                     modifier =
                                             Modifier.fillMaxSize()
-                                                    .verticalScroll(rememberScrollState())
+                                                    .verticalScroll(
+                                                            rememberScrollState()
+                                                    )
                                                     .padding(24.dp)
                             ) {
 
-                                // Título de la sección.
-                                Text(text = "Ayuda", color = Color.White, fontSize = 22.sp)
-
-                                Spacer(modifier = Modifier.height(20.dp))
-
-                                // Introducción.
                                 Text(
-                                        text = "¿Qué puedo pedirle a Apache?",
+                                        text = "Ayuda",
+                                        color = Color.White,
+                                        fontSize = 22.sp
+                                )
+
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(20.dp)
+                                )
+
+                                Text(
+                                        text =
+                                                "¿Qué puedo pedirle a Apache?",
                                         color = Color.White,
                                         fontSize = 17.sp
                                 )
 
-                                Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(8.dp)
+                                )
 
                                 Text(
                                         text =
                                                 "Escribe o habla con naturalidad. Apache elige la herramienta adecuada y te pide confirmación antes de acciones sensibles.",
-                                        color = Color(0xFFAAAAAA),
+                                        color =
+                                                Color(0xFFAAAAAA),
                                         fontSize = 15.sp
                                 )
 
-                                Spacer(modifier = Modifier.height(24.dp))
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(24.dp)
+                                )
 
                                 Text(
                                         text = "Qué puede hacer",
@@ -1456,137 +2587,190 @@ fun App() {
                                         fontSize = 17.sp
                                 )
 
-                                Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(8.dp)
+                                )
 
                                 Text(
                                         text =
                                                 "• Aplicaciones: abrir, cerrar o comprobar si una aplicación está abierta.\n• Música: reproducir, pausar, cambiar de pista, consultar lo que suena y ajustar el volumen.\n• Tiempo: consultar el tiempo actual y la previsión.\n• Sistema: ver recursos e información del ordenador.\n• Fecha y hora: consultar la hora actual.",
-                                        color = Color(0xFFCCCCCC),
+                                        color =
+                                                Color(0xFFCCCCCC),
                                         fontSize = 15.sp
                                 )
 
-                                Spacer(modifier = Modifier.height(24.dp))
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(24.dp)
+                                )
 
-                                // EJEMPLOS DE MÚSICA
+                                Text(
+                                        text = "Música",
+                                        color =
+                                                Color(0xFF1DB954),
+                                        fontSize = 17.sp
+                                )
 
-                                Text(text = "Música", color = Color(0xFF1DB954), fontSize = 17.sp)
-
-                                Spacer(modifier = Modifier.height(6.dp))
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(6.dp)
+                                )
 
                                 Text(
                                         text = "«Pon música»",
-                                        color = Color(0xFFCCCCCC),
+                                        color =
+                                                Color(0xFFCCCCCC),
                                         fontSize = 15.sp
                                 )
 
                                 Text(
                                         text = "«Pausa la música»",
-                                        color = Color(0xFFCCCCCC),
+                                        color =
+                                                Color(0xFFCCCCCC),
                                         fontSize = 15.sp
                                 )
 
                                 Text(
                                         text = "«Sube el volumen»",
-                                        color = Color(0xFFCCCCCC),
+                                        color =
+                                                Color(0xFFCCCCCC),
                                         fontSize = 15.sp
                                 )
 
                                 Text(
                                         text = "«¿Qué está sonando?»",
-                                        color = Color(0xFFCCCCCC),
+                                        color =
+                                                Color(0xFFCCCCCC),
                                         fontSize = 15.sp
                                 )
 
                                 Text(
                                         text = "«Pon el volumen al 40 %»",
-                                        color = Color(0xFFCCCCCC),
+                                        color =
+                                                Color(0xFFCCCCCC),
                                         fontSize = 15.sp
                                 )
 
-                                Spacer(modifier = Modifier.height(20.dp))
-
-                                // =================================================
-                                // EJEMPLOS DE APLICACIONES
-                                // =================================================
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(20.dp)
+                                )
 
                                 Text(
                                         text = "Aplicaciones",
-                                        color = Color(0xFF1DB954),
+                                        color =
+                                                Color(0xFF1DB954),
                                         fontSize = 17.sp
                                 )
 
-                                Spacer(modifier = Modifier.height(6.dp))
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(6.dp)
+                                )
 
                                 Text(
                                         text = "«Abre Discord»",
-                                        color = Color(0xFFCCCCCC),
+                                        color =
+                                                Color(0xFFCCCCCC),
                                         fontSize = 15.sp
                                 )
 
                                 Text(
-                                        text = "«Abre Discord y la calculadora»",
-                                        color = Color(0xFFCCCCCC),
+                                        text =
+                                                "«Abre Discord y la calculadora»",
+                                        color =
+                                                Color(0xFFCCCCCC),
                                         fontSize = 15.sp
                                 )
 
                                 Text(
                                         text = "«Cierra Discord»",
-                                        color = Color(0xFFCCCCCC),
+                                        color =
+                                                Color(0xFFCCCCCC),
                                         fontSize = 15.sp
                                 )
 
                                 Text(
-                                        text = "«¿Está abierto Visual Studio Code?»",
-                                        color = Color(0xFFCCCCCC),
+                                        text =
+                                                "«¿Está abierto Visual Studio Code?»",
+                                        color =
+                                                Color(0xFFCCCCCC),
                                         fontSize = 15.sp
                                 )
 
-                                Spacer(modifier = Modifier.height(20.dp))
-
-                                // =================================================
-                                // EJEMPLOS DE SISTEMA
-                                // =================================================
-
-                                Text(text = "Sistema", color = Color(0xFF1DB954), fontSize = 17.sp)
-
-                                Spacer(modifier = Modifier.height(6.dp))
-
-                                Text(
-                                        text = "«¿Qué recursos está usando mi PC?»",
-                                        color = Color(0xFFCCCCCC),
-                                        fontSize = 15.sp
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(20.dp)
                                 )
 
-                                Spacer(modifier = Modifier.height(20.dp))
-
-                                // =================================================
-                                // EJEMPLOS DE TIEMPO
-                                // =================================================
-
-                                Text(text = "Tiempo", color = Color(0xFF1DB954), fontSize = 17.sp)
-
-                                Spacer(modifier = Modifier.height(6.dp))
-
                                 Text(
-                                        text = "«¿Qué tiempo hace mañana?»",
-                                        color = Color(0xFFCCCCCC),
-                                        fontSize = 15.sp
-                                )
-
-                                Spacer(modifier = Modifier.height(24.dp))
-
-                                Text(
-                                        text = "Control por voz",
-                                        color = Color(0xFF1DB954),
+                                        text = "Sistema",
+                                        color =
+                                                Color(0xFF1DB954),
                                         fontSize = 17.sp
                                 )
 
-                                Spacer(modifier = Modifier.height(6.dp))
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(6.dp)
+                                )
+
+                                Text(
+                                        text =
+                                                "«¿Qué recursos está usando mi PC?»",
+                                        color =
+                                                Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(20.dp)
+                                )
+
+                                Text(
+                                        text = "Tiempo",
+                                        color =
+                                                Color(0xFF1DB954),
+                                        fontSize = 17.sp
+                                )
+
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(6.dp)
+                                )
+
+                                Text(
+                                        text =
+                                                "«¿Qué tiempo hace mañana?»",
+                                        color =
+                                                Color(0xFFCCCCCC),
+                                        fontSize = 15.sp
+                                )
+
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(24.dp)
+                                )
+
+                                Text(
+                                        text = "Control por voz",
+                                        color =
+                                                Color(0xFF1DB954),
+                                        fontSize = 17.sp
+                                )
+
+                                Spacer(
+                                        modifier =
+                                                Modifier.height(6.dp)
+                                )
 
                                 Text(
                                         text =
                                                 "Pulsa el micrófono para una orden puntual. Activa «Escucha activada» para hablar sin tocar el botón: di «Apache» seguido de la orden, por ejemplo «Apache, abre Discord». El modo sigue activo después de cada respuesta. Para detenerlo, di «Apache, apaga» o «Apache, corto», o pulsa el botón de escucha.",
-                                        color = Color(0xFFCCCCCC),
+                                        color =
+                                                Color(0xFFCCCCCC),
                                         fontSize = 15.sp
                                 )
                             }
@@ -1595,42 +2779,306 @@ fun App() {
                 }
 
                 // Avisos no leídos, superpuestos en la esquina superior derecha.
-                Column(modifier = Modifier.align(Alignment.TopEnd).padding(20.dp).width(320.dp)) {
+                Column(
+                        modifier =
+                                Modifier.align(
+                                        Alignment.TopEnd
+                                )
+                                        .padding(20.dp)
+                                        .width(320.dp)
+                ) {
+
                     pendingNotifications.forEach { notification ->
+
                         Surface(
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                                color = Color(0xFF1DB954),
-                                shape = RoundedCornerShape(10.dp)
+                                modifier =
+                                        Modifier.fillMaxWidth()
+                                                .padding(
+                                                        bottom = 10.dp
+                                                ),
+                                color =
+                                        Color(0xFF1DB954),
+                                shape =
+                                        RoundedCornerShape(
+                                                10.dp
+                                        )
                         ) {
+
                             Row(
-                                    modifier = Modifier.padding(14.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    modifier =
+                                            Modifier.padding(
+                                                    14.dp
+                                            ),
+                                    horizontalArrangement =
+                                            Arrangement.SpaceBetween
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
+
+                                Column(
+                                        modifier =
+                                                Modifier.weight(
+                                                        1f
+                                                )
+                                ) {
+
                                     Text(
-                                            text = notification.title,
-                                            color = Color.Black,
-                                            fontSize = 14.sp
+                                            text =
+                                                    notification.title,
+                                            color =
+                                                    Color.Black,
+                                            fontSize =
+                                                    14.sp
                                     )
-                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                    Spacer(
+                                            modifier =
+                                                    Modifier.height(
+                                                            4.dp
+                                                    )
+                                    )
+
                                     Text(
-                                            text = notification.message,
-                                            color = Color(0xFF0A2E17),
-                                            fontSize = 13.sp
+                                            text =
+                                                    notification.message,
+                                            color =
+                                                    Color(0xFF0A2E17),
+                                            fontSize =
+                                                    13.sp
                                     )
                                 }
+
                                 Text(
                                         text = "✕",
-                                        color = Color.Black,
-                                        fontSize = 14.sp,
+                                        color =
+                                                Color.Black,
+                                        fontSize =
+                                                14.sp,
                                         modifier =
                                                 Modifier.clickable {
-                                                    dismissNotification(notification.id)
+                                                    dismissNotification(
+                                                            notification.id
+                                                    )
                                                 }
                                 )
                             }
                         }
                     }
+                }
+
+                // =========================================================
+                // ARCHIVO DE EVENTOS COMPLETADOS
+                // =========================================================
+
+                if (showCompletedArchive) {
+                    AlertDialog(
+                            onDismissRequest = {
+                                if (!calendarLoading) {
+                                    showCompletedArchive = false
+                                }
+                            },
+                            containerColor =
+                                    Color(0xFF202A24),
+                            titleContentColor =
+                                    Color.White,
+                            textContentColor =
+                                    Color(0xFFCCCCCC),
+                            title = {
+                                Text(
+                                        text = "Archivo"
+                                )
+                            },
+                            text = {
+                                Column(
+                                        modifier =
+                                                Modifier.heightIn(
+                                                        max = 420.dp
+                                                )
+                                ) {
+                                    if (
+                                            calendarEvents.none {
+                                                it.status == "completed"
+                                            }
+                                    ) {
+                                        Text(
+                                                text =
+                                                        "No hay eventos terminados todavía.",
+                                                color =
+                                                        Color(0xFFB7C2BB)
+                                        )
+                                    } else {
+                                        LazyColumn {
+                                            items(
+                                                    calendarEvents
+                                                            .filter {
+                                                                it.status == "completed"
+                                                            }
+                                                            .sortedByDescending {
+                                                                it.startAt
+                                                            },
+                                                    key = {
+                                                        it.id
+                                                    }
+                                            ) { event ->
+                                                Column(
+                                                        modifier =
+                                                                Modifier
+                                                                        .fillMaxWidth()
+                                                                        .padding(
+                                                                                vertical = 8.dp
+                                                                        )
+                                                ) {
+                                                    Text(
+                                                            text = event.title,
+                                                            color =
+                                                                    Color.White,
+                                                            fontSize =
+                                                                    15.sp
+                                                    )
+
+                                                    Spacer(
+                                                            modifier =
+                                                                    Modifier.height(
+                                                                            4.dp
+                                                                    )
+                                                    )
+
+                                                    Text(
+                                                            text =
+                                                                    event.startAt
+                                                                            .replace(
+                                                                                    'T',
+                                                                                    ' '
+                                                                            )
+                                                                            .take(
+                                                                                    16
+                                                                            ),
+                                                            color =
+                                                                    Color(
+                                                                            0xFF8FA59A
+                                                                    ),
+                                                            fontSize =
+                                                                    13.sp
+                                                    )
+
+                                                    if (!event.location.isNullOrBlank()) {
+                                                        Spacer(
+                                                                modifier =
+                                                                        Modifier.height(
+                                                                                2.dp
+                                                                        )
+                                                        )
+
+                                                        Text(
+                                                                text =
+                                                                        event.location,
+                                                                color =
+                                                                        Color(
+                                                                                0xFF8FA59A
+                                                                        ),
+                                                                fontSize =
+                                                                        12.sp
+                                                        )
+                                                    }
+                                                }
+
+                                                HorizontalDivider(
+                                                        color =
+                                                                Color(
+                                                                        0xFF334039
+                                                                )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(
+                                        onClick = {
+                                            showCompletedArchive = false
+                                        }
+                                ) {
+                                    Text(
+                                            text = "Cerrar",
+                                            color =
+                                                    Color(0xFF6FE19A)
+                                    )
+                                }
+                            }
+                    )
+                }
+
+                // =========================================================
+                // DIÁLOGO DE CONFIRMACIÓN DE CANCELACIÓN
+                // =========================================================
+
+                calendarEventPendingCancellation?.let { event ->
+
+                    AlertDialog(
+                            onDismissRequest = {
+                                if (!calendarLoading) {
+                                    calendarEventPendingCancellation =
+                                            null
+                                }
+                            },
+                            containerColor =
+                                    Color(0xFF202A24),
+                            titleContentColor =
+                                    Color.White,
+                            textContentColor =
+                                    Color(0xFFCCCCCC),
+                            title = {
+                                Text(
+                                        text = "Cancelar evento"
+                                )
+                            },
+                            text = {
+                                Text(
+                                        text =
+                                                "¿Quieres cancelar «${event.title}»? El evento se conservará en el historial, pero dejará de aparecer en tu calendario."
+                                )
+                            },
+                            confirmButton = {
+
+                                TextButton(
+                                        onClick = {
+
+                                            calendarEventPendingCancellation =
+                                                    null
+
+                                            cancelCalendarEventFromUi(
+                                                    event
+                                            )
+                                        },
+                                        enabled =
+                                                !calendarLoading
+                                ) {
+
+                                    Text(
+                                            text = "Cancelar evento",
+                                            color =
+                                                    Color(0xFFFF9B9B)
+                                    )
+                                }
+                            },
+                            dismissButton = {
+
+                                TextButton(
+                                        onClick = {
+                                            calendarEventPendingCancellation =
+                                                    null
+                                        },
+                                        enabled =
+                                                !calendarLoading
+                                ) {
+
+                                    Text(
+                                            text = "Volver",
+                                            color =
+                                                    Color(0xFF6FE19A)
+                                    )
+                                }
+                            }
+                    )
                 }
             }
         }

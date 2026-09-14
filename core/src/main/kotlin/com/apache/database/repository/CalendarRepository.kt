@@ -2,7 +2,9 @@ package com.apache.database.repository
 
 import com.apache.database.tables.CalendarEvents
 import com.apache.database.tables.Calendars
+
 import java.time.LocalDateTime
+
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.and
@@ -11,10 +13,12 @@ import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
+
 import org.springframework.stereotype.Repository
 
 /**
  * Representación de un evento de calendario obtenida desde la base de datos.
+ *
  * No es una tabla Exposed: es el objeto que usamos para transportar los datos.
  */
 data class CalendarEventRecord(
@@ -47,7 +51,10 @@ class CalendarRepository {
 
         val existing = Calendars
             .selectAll()
-            .where { (Calendars.userId eq userId) and (Calendars.active eq true) }
+            .where {
+                (Calendars.userId eq userId) and
+                    (Calendars.active eq true)
+            }
             .orderBy(Calendars.id, SortOrder.ASC)
             .firstOrNull()
 
@@ -93,7 +100,10 @@ class CalendarRepository {
         } get CalendarEvents.id
     }
 
-    /** Eventos de un calendario cuyo `startAt` cae dentro de [from]..[to], ordenados cronológicamente. */
+    /**
+     * Eventos de un calendario cuyo `startAt` cae dentro de [from]..[to],
+     * ordenados cronológicamente.
+     */
     fun findEventsBetween(
         calendarId: Long,
         from: LocalDateTime,
@@ -113,14 +123,20 @@ class CalendarRepository {
     }
 
     fun findEventById(eventId: Long): CalendarEventRecord? = transaction {
+
         CalendarEvents
             .selectAll()
-            .where { CalendarEvents.id eq eventId }
+            .where {
+                CalendarEvents.id eq eventId
+            }
             .singleOrNull()
             ?.toRecord()
     }
 
-    /** Actualiza solo los campos no nulos que se pasen; el resto se deja como estaba. */
+    /**
+     * Actualiza solo los campos no nulos que se pasen;
+     * el resto se deja como estaba.
+     */
     fun updateEvent(
         eventId: Long,
         title: String?,
@@ -132,29 +148,70 @@ class CalendarRepository {
 
         val current = CalendarEvents
             .selectAll()
-            .where { CalendarEvents.id eq eventId }
-            .singleOrNull() ?: return@transaction false
+            .where {
+                CalendarEvents.id eq eventId
+            }
+            .singleOrNull()
+            ?: return@transaction false
 
-        CalendarEvents.update({ CalendarEvents.id eq eventId }) {
-            it[CalendarEvents.title] = title ?: current[CalendarEvents.title]
-            it[CalendarEvents.description] = description ?: current[CalendarEvents.description]
-            it[CalendarEvents.startAt] = startAt ?: current[CalendarEvents.startAt]
-            it[CalendarEvents.endAt] = endAt ?: current[CalendarEvents.endAt]
-            it[CalendarEvents.location] = location ?: current[CalendarEvents.location]
-            it[CalendarEvents.updatedAt] = LocalDateTime.now()
+        CalendarEvents.update({
+            CalendarEvents.id eq eventId
+        }) {
+            it[CalendarEvents.title] =
+                title ?: current[CalendarEvents.title]
+
+            it[CalendarEvents.description] =
+                description ?: current[CalendarEvents.description]
+
+            it[CalendarEvents.startAt] =
+                startAt ?: current[CalendarEvents.startAt]
+
+            it[CalendarEvents.endAt] =
+                endAt ?: current[CalendarEvents.endAt]
+
+            it[CalendarEvents.location] =
+                location ?: current[CalendarEvents.location]
+
+            it[CalendarEvents.updatedAt] =
+                LocalDateTime.now()
         } > 0
     }
 
-    /** Cancela un evento (borrado lógico) en lugar de eliminar la fila. */
+    /**
+     * Cancela un evento (borrado lógico) en lugar de eliminar la fila.
+     */
     fun cancelEvent(eventId: Long): Boolean = transaction {
-        CalendarEvents.update({ CalendarEvents.id eq eventId }) {
+
+        CalendarEvents.update({
+            CalendarEvents.id eq eventId
+        }) {
             it[CalendarEvents.status] = "cancelled"
             it[CalendarEvents.updatedAt] = LocalDateTime.now()
         } > 0
     }
 
+    /**
+     * Marca un evento como completado.
+     */
+    fun completeEvent(eventId: Long): Boolean = transaction {
+
+        CalendarEvents.update({
+            CalendarEvents.id eq eventId
+        }) {
+            it[CalendarEvents.status] = "completed"
+            it[CalendarEvents.updatedAt] = LocalDateTime.now()
+        } > 0
+    }
+
     fun deleteEvent(eventId: Long): Boolean = transaction {
-        CalendarEvents.deleteWhere(op = { it.run { CalendarEvents.id eq eventId } }) > 0
+
+        CalendarEvents.deleteWhere(
+            op = {
+                it.run {
+                    CalendarEvents.id eq eventId
+                }
+            }
+        ) > 0
     }
 
     private fun ResultRow.toRecord() = CalendarEventRecord(
