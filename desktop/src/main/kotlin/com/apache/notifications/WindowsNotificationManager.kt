@@ -1,75 +1,50 @@
 package com.apache.notifications
 
-import java.awt.SystemTray
-import java.awt.TrayIcon
-import java.awt.Toolkit
-
 /**
- * Gestiona las notificaciones nativas de Windows.
+ * Muestra notificaciones nativas de Windows.
  *
- * Utiliza el sistema de notificaciones disponible mediante AWT,
- * evitando añadir dependencias externas al proyecto.
+ * El Desktop utiliza PowerShell para solicitar a Windows una notificación Toast,
+ * evitando añadir una dependencia externa únicamente para esta funcionalidad.
  */
 object WindowsNotificationManager {
 
-    private var trayIcon: TrayIcon? = null
-
-    /**
-     * Inicializa el icono necesario para mostrar notificaciones.
-     */
-    fun initialize() {
-        if (!SystemTray.isSupported()) {
-            return
-        }
-
-        if (trayIcon != null) {
-            return
-        }
-
-        val image = Toolkit.getDefaultToolkit().createImage(ByteArray(0))
-
-        trayIcon =
-            TrayIcon(image, "Apache").apply {
-                isImageAutoSize = true
-            }
-
-        try {
-            SystemTray.getSystemTray().add(trayIcon)
-        } catch (_: Exception) {
-            trayIcon = null
-        }
-    }
-
-    /**
-     * Muestra una notificación nativa del sistema.
-     */
     fun show(title: String, message: String) {
-        initialize()
+        if (title.isBlank() && message.isBlank()) return
+
+        val safeTitle = escapeXml(title)
+        val safeMessage = escapeXml(message)
+
+        val script =
+            "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; " +
+            "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null; " +
+            "\$xml = New-Object Windows.Data.Xml.Dom.XmlDocument; " +
+            "\$xml.LoadXml(\"<toast><visual><binding template='ToastGeneric'><text>$safeTitle</text><text>$safeMessage</text></binding></visual></toast>\"); " +
+            "\$toast = [Windows.UI.Notifications.ToastNotification]::new(\$xml); " +
+            "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Apache').Show(\$toast)"
 
         try {
-            trayIcon?.displayMessage(
-                title,
-                message,
-                TrayIcon.MessageType.INFO
+            ProcessBuilder(
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script
             )
+                .redirectErrorStream(true)
+                .start()
         } catch (_: Exception) {
-            // Si Windows no permite mostrar la notificación,
-            // no interrumpimos el funcionamiento de Apache.
+            // Fallo silencioso: la notificación no debe interrumpir Apache.
         }
     }
 
-    /**
-     * Libera los recursos utilizados por el icono de la bandeja.
-     */
-    fun dispose() {
-        trayIcon?.let {
-            try {
-                SystemTray.getSystemTray().remove(it)
-            } catch (_: Exception) {
-                // No hacemos nada si Windows ya ha eliminado el icono.
-            }
-        }
-
-        trayIcon = null
+    private fun escapeXml(value: String): String {
+        return value
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+            .replace("'", "&apos;")
     }
 }

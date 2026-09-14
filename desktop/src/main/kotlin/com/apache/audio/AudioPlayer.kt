@@ -1,20 +1,21 @@
 package com.apache.audio
 
+import java.io.ByteArrayInputStream
 import javax.sound.sampled.AudioFormat
+import javax.sound.sampled.AudioInputStream
 import javax.sound.sampled.AudioSystem
-import javax.sound.sampled.SourceDataLine
 
 /**
- * Reproduce audio PCM mediante los altavoces del sistema.
+ * Reproduce audio PCM recibido desde Apache Core.
  *
- * El audio grabado por el micrófono usa siempre 16 kHz, pero el audio
- * generado por Text-to-Speech puede venir con otra frecuencia de
- * muestreo, así que se indica explícitamente en cada reproducción
- * (por defecto 16 kHz, para no romper otros usos existentes).
+ * El Core devuelve el audio codificado en Base64 y VoiceController lo convierte
+ * a ByteArray antes de llegar aquí. El formato esperado es PCM lineal de 16 bits,
+ * mono, con la frecuencia de muestreo indicada por el Core.
  */
 class AudioPlayer {
 
-    fun play(audioData: ByteArray, sampleRate: Int = 16_000) {
+    fun play(audioData: ByteArray, sampleRate: Int) {
+        if (audioData.isEmpty() || sampleRate <= 0) return
 
         val format = AudioFormat(
             sampleRate.toFloat(),
@@ -24,17 +25,19 @@ class AudioPlayer {
             false
         )
 
-        val dataLine: SourceDataLine = AudioSystem.getSourceDataLine(format)
+        val audioInputStream = AudioInputStream(
+            ByteArrayInputStream(audioData),
+            format,
+            audioData.size.toLong() / format.frameSize
+        )
 
-        dataLine.open(format)
-        dataLine.start()
+        AudioSystem.getClip().use { clip ->
+            clip.open(audioInputStream)
+            clip.start()
 
-        try {
-            dataLine.write(audioData, 0, audioData.size)
-            dataLine.drain()
-        } finally {
-            dataLine.stop()
-            dataLine.close()
+            while (clip.isRunning) {
+                Thread.sleep(10)
+            }
         }
     }
 }

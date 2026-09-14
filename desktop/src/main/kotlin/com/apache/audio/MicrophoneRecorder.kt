@@ -1,19 +1,17 @@
 package com.apache.audio
 
 import java.io.ByteArrayOutputStream
-
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioSystem
+import javax.sound.sampled.DataLine
 import javax.sound.sampled.TargetDataLine
 
 /**
- * Se encarga de capturar audio desde el micrófono del sistema.
+ * Graba audio del micrófono en PCM lineal de 16 bits, mono y 16 kHz.
  *
- * Utiliza PCM 16-bit, 16 kHz y mono, un formato adecuado para
- * el posterior procesamiento mediante Speech-to-Text.
- *
- * La grabación se detiene automáticamente después de varios segundos
- * de silencio una vez que se ha detectado voz.
+ * La grabación se ejecuta en un hilo independiente para no bloquear la interfaz.
+ * La captura puede finalizar mediante stop() o automáticamente después de
+ * aproximadamente un segundo de silencio.
  */
 class MicrophoneRecorder {
 
@@ -25,210 +23,187 @@ class MicrophoneRecorder {
         false
     )
 
-    // Un segundo ofrece una respuesta ágil tras decir la orden sin cortar
-    // las pausas naturales entre palabras.
-    private val silenceTimeoutMs = 1_000L
-
-    /**
-     * Nivel mínimo de audio necesario para considerar
-     * que el usuario está hablando.
-     *
-     * El micrófono utilizado presenta un nivel de ruido
-     * aproximado de 21.000-23.000 en silencio.
-     */
-    private val voiceThreshold = 30_000.0
-
-    private var line: TargetDataLine? = null
-
-    private var recordingThread: Thread? = null
-
-    private var audioData = ByteArrayOutputStream()
-
     @Volatile
     private var recording = false
 
-    @Synchronized
-    fun start(onAutoStop: (ByteArray) -> Unit = {}) {
+    @Volatile
+    private var line: TargetDataLine? = null
 
-        if (recording) {
-            return
-        }
+    @Volatile
+    private var recordingThread: Thread? = null
 
-        val dataLine = AudioSystem.getTargetDataLine(format)
+    private var currentOutput: ByteArrayOutputStream? = null
 
-        dataLine.open(format)
-        dataLine.start()
+    @Volatile
+    private var currentCallback: ((ByteArray) -> Unit)? = null
 
-        line = dataLine
-        audioData = ByteArrayOutputStream()
-        recording = true
+    private val lock = Any()
 
-        recordingThread = Thread {
+    /**
+     * Inicia una grabación en segundo plano.
+     *
+     * El callback se ejecuta cuando la grabación termina automáticamente
+     * por silencio. Si la grabación se detiene manualmente mediante stop(),
+     * el audio se devuelve directamente desde stop().
+     */
+    fun start(onAudioCaptured: (ByteArray) -> Unit) {
+        synchronized(lock) {
+            if (recording) return
 
-            val buffer = ByteArray(4096)
+            val info = DataLine.Info(TargetDataLine::class.java, format)
 
-            var voiceDetected = false
-            var silenceStartedAt: Long? = null
-
-            try {
-
-                while (recording) {
-
-                    val bytesRead =
-                        dataLine.read(
-                            buffer,
-                            0,
-                            buffer.size
-                        )
-
-                    if (bytesRead <= 0) {
-                        continue
-                    }
-
-                    audioData.write(
-                        buffer,
-                        0,
-                        bytesRead
-                    )
-
-                    val audioLevel =
-                        calculateRms(
-                            buffer,
-                            bytesRead
-                        )
-
-                    val hasVoice =
-                        audioLevel >= voiceThreshold
-
-                    if (hasVoice) {
-
-                        voiceDetected = true
-                        silenceStartedAt = null
-
-                    } else if (voiceDetected) {
-
-                        if (silenceStartedAt == null) {
-
-                            silenceStartedAt =
-                                System.currentTimeMillis()
-
-                        }
-
-                        val silenceDuration =
-                            System.currentTimeMillis() -
-                                    silenceStartedAt
-
-                        if (silenceDuration >= silenceTimeoutMs) {
-
-                            val recordedAudio =
-                                finishRecording()
-
-                            if (recordedAudio.isNotEmpty()) {
-                                onAutoStop(recordedAudio)
-                            }
-
-                            break
-                        }
-                    }
-                }
-
-            } finally {
-
-                closeLine(dataLine)
+            if (!AudioSystem.isLineSupported(info)) {
+                throw IllegalStateException(
+                    "El micrófono no admite el formato PCM de 16 kHz."
+                )
             }
 
-        }.apply {
+            val targetLine = AudioSystem.getLine(info) as TargetDataLine
+            targetLine.open(format)
+            targetLine.start()
 
-            isDaemon = true
-            name = "Apache-MicrophoneRecorder"
-            start()
+            line = targetLine
+            recording = true
+            currentOutput = ByteArrayOutputStream()
+            currentCallback = onAudioCaptured
+
+            val thread = Thread {
+                captureAudio(targetLine)
+            }
+
+            thread.isDaemon = true
+            recordingThread = thread
+            thread.start()
         }
     }
 
-    @Synchronized
+    /**
+     * Detiene la grabación actual y devuelve el audio capturado hasta ese momento.
+     */
     fun stop(): ByteArray {
+        val targetLine: TargetDataLine?
+        val output: ByteArray
 
-        if (!recording) {
-            return ByteArray(0)
-        }
+        synchronized(lock) {
+            if (!recording) {
+                return currentOutput?.toByteArray() ?: ByteArray(0)
+            }
 
-        return finishRecording()
-    }
+            recording = false
 
-    @Synchronized
-    private fun finishRecording(): ByteArray {
+            targetLine = line
+            output = currentOutput?.toByteArray() ?: ByteArray(0)
 
-        recording = false
-
-        line?.stop()
-        line?.close()
-
-        line = null
-        recordingThread = null
-
-        return audioData.toByteArray()
-    }
-
-    private fun closeLine(dataLine: TargetDataLine) {
-
-        try {
-            dataLine.stop()
-        } catch (_: Exception) {
+            currentCallback = null
         }
 
         try {
-            dataLine.close()
+            targetLine?.stop()
         } catch (_: Exception) {
+            // La línea puede haberse cerrado automáticamente.
         }
+
+        try {
+            targetLine?.close()
+        } catch (_: Exception) {
+            // La línea puede haberse cerrado automáticamente.
+        }
+
+        return output
     }
 
-    private fun calculateRms(
-        buffer: ByteArray,
-        length: Int
-    ): Double {
+    /**
+     * Mantiene la captura hasta que se solicita detenerla o se detecta
+     * aproximadamente un segundo de silencio.
+     */
+    private fun captureAudio(targetLine: TargetDataLine) {
+        val output = currentOutput ?: return
+        val buffer = ByteArray(4096)
 
-        if (length < 2) {
-            return 0.0
-        }
+        var silentBytes = 0
 
-        var sum = 0.0
-        var samples = 0
+        // Aproximadamente un segundo de silencio:
+        // 16.000 muestras * 2 bytes por muestra.
+        val maxSilenceBytes = 16_000 * 2
 
-        var index = 0
+        val silenceThreshold = 500
 
-        while (index + 1 < length) {
+        var capturedBySilence = false
 
-            val low =
-                buffer[index].toInt() and 0xFF
+        try {
+            while (recording) {
+                val bytesRead = targetLine.read(buffer, 0, buffer.size)
 
-            val high =
-                buffer[index + 1].toInt()
+                if (bytesRead <= 0) continue
 
-            val sample =
-                (high shl 8) or low
+                output.write(buffer, 0, bytesRead)
 
-            val signedSample =
-                if (sample and 0x8000 != 0) {
-                    sample - 0x10000
-                } else {
-                    sample
+                var maxAmplitude = 0
+                var index = 0
+
+                while (index + 1 < bytesRead) {
+                    val sample =
+                        (buffer[index].toInt() and 0xFF) or
+                            (buffer[index + 1].toInt() shl 8)
+
+                    val amplitude = kotlin.math.abs(sample)
+
+                    if (amplitude > maxAmplitude) {
+                        maxAmplitude = amplitude
+                    }
+
+                    index += 2
                 }
 
-            sum +=
-                signedSample.toDouble() *
-                        signedSample.toDouble()
+                if (maxAmplitude < silenceThreshold) {
+                    silentBytes += bytesRead
 
-            samples++
+                    if (silentBytes >= maxSilenceBytes) {
+                        capturedBySilence = true
+                        recording = false
+                    }
+                } else {
+                    silentBytes = 0
+                }
+            }
+        } finally {
+            try {
+                targetLine.stop()
+            } catch (_: Exception) {
+                // La línea puede haberse detenido previamente.
+            }
 
-            index += 2
+            try {
+                targetLine.close()
+            } catch (_: Exception) {
+                // La línea puede haberse cerrado previamente.
+            }
+
+            val audio = output.toByteArray()
+
+            synchronized(lock) {
+                if (line === targetLine) {
+                    line = null
+                }
+
+                if (recordingThread === Thread.currentThread()) {
+                    recordingThread = null
+                }
+
+                currentOutput = null
+
+                val callback = if (capturedBySilence) {
+                    currentCallback
+                } else {
+                    null
+                }
+
+                currentCallback = null
+
+                if (callback != null && audio.isNotEmpty()) {
+                    callback(audio)
+                }
+            }
         }
-
-        if (samples == 0) {
-            return 0.0
-        }
-
-        return kotlin.math.sqrt(
-            sum / samples
-        )
     }
 }
