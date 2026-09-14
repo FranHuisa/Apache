@@ -17,6 +17,7 @@ object CoreProcessManager {
 
     private const val CORE_PORT = 8080
     private const val CORE_HEALTH_URL = "http://localhost:$CORE_PORT"
+    private const val CORE_RESOURCE = "/core/apache-core.jar"
 
     private var coreProcess: Process? = null
 
@@ -104,6 +105,45 @@ object CoreProcessManager {
 
     private fun findCoreJar(): File? {
 
+        /*
+         * Cuando Apache está empaquetado, el Core se encuentra dentro
+         * de los recursos del Desktop y no existe como archivo físico.
+         *
+         * Extraemos el JAR a una carpeta temporal para poder ejecutarlo
+         * mediante ProcessBuilder.
+         */
+        val resource = javaClass.getResourceAsStream(CORE_RESOURCE)
+
+        if (resource != null) {
+
+            val runtimeDirectory = File(
+                System.getProperty("java.io.tmpdir"),
+                "apache/core"
+            )
+
+            if (!runtimeDirectory.exists()) {
+                runtimeDirectory.mkdirs()
+            }
+
+            val coreJar = File(
+                runtimeDirectory,
+                "apache-core.jar"
+            )
+
+            resource.use { input ->
+                coreJar.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            return coreJar
+        }
+
+        /*
+         * Durante el desarrollo mantenemos las ubicaciones físicas
+         * como alternativa para poder ejecutar Apache directamente
+         * desde Gradle.
+         */
         val currentDirectory = File(
             System.getProperty("user.dir")
         )
