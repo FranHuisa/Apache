@@ -1,3 +1,6 @@
+import org.gradle.api.tasks.Copy
+import org.gradle.jvm.tasks.Jar
+
 plugins {
     kotlin("jvm") version "1.9.24"
     id("org.jetbrains.compose") version "1.6.11"
@@ -12,7 +15,7 @@ repositories {
 }
 
 dependencies {
-    
+
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
 
@@ -28,19 +31,46 @@ kotlin {
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     kotlinOptions.jvmTarget = "21"
 }
+
+/*
+ * Copia el Core ejecutable dentro de los recursos del Desktop.
+ *
+ * El Core se genera mediante Spring Boot como un JAR ejecutable que
+ * contiene todas sus dependencias.
+ *
+ * De esta forma, el Desktop podrá incluir el Core cuando se empaquete
+ * como aplicación/instalador.
+ */
+tasks.processResources {
+    dependsOn(project(":core").tasks.named("bootJar"))
+
+    from(project(":core").tasks.named<Jar>("bootJar")) {
+        into("core")
+        rename {
+            "apache-core.jar"
+        }
+    }
+}
+
 compose.desktop {
     application {
+
         mainClass = "com.apache.MainKt"
 
-        // Genera el instalador/ejecutable nativo de Windows (jpackage por debajo).
-        //
-        // IMPORTANTE: esto empaqueta únicamente el módulo `desktop` (la interfaz).
-        // Apache sigue necesitando que `core` (Spring Boot, puerto 8080) y MySQL
-        // estén arrancados por separado: el ejecutable no los incluye ni los
-        // lanza automáticamente. Ver docs/BITACORA.md, sección "Siguiente fase",
-        // para la tarea pendiente de unificar el arranque en 0.2.0.
+        /*
+         * Genera el instalador/ejecutable nativo de Windows
+         * (jpackage por debajo).
+         *
+         * Apache incluye ahora también el Core dentro de sus recursos.
+         * El Desktop será el encargado de iniciar el Core automáticamente
+         * cuando se ejecute la aplicación.
+         */
         nativeDistributions {
-            targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe)
+
+            targetFormats(
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
+                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe
+            )
 
             packageName = "Apache"
             packageVersion = "0.1.0"
