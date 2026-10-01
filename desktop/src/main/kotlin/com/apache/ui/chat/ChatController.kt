@@ -78,7 +78,7 @@ class ChatController(private val scope: CoroutineScope) {
 
             conversationId = response.conversationId
             SessionStore.saveConversationId(response.conversationId)
-            appendMessage(ChatMessage(reply, false))
+            appendMessage(ChatMessage(reply, false, response.images))
 
             if (speak) {
                 onReply?.invoke(reply)
