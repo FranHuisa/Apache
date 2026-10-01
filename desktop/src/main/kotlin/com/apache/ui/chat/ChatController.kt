@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.apache.model.ChatMessage
+import com.apache.model.ConversationMessageDto
 import com.apache.network.sendMessageToCore
 import com.apache.session.SessionStore
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +39,28 @@ class ChatController(private val scope: CoroutineScope) {
 
     private fun appendMessage(message: ChatMessage) {
         messages = messages + message
+    }
+
+    /**
+     * Retoma una conversación pasada (desde la sección Memoria): el chat
+     * muestra sus mensajes y los siguientes se añaden a esa conversación.
+     */
+    fun openConversation(id: Long, history: List<ConversationMessageDto>) {
+        if (isLoading) return
+
+        conversationId = id
+        SessionStore.saveConversationId(id)
+        messages = listOf(ChatMessage("Conversación retomada. Sigue donde lo dejaste.", false)) +
+            history.map { ChatMessage(it.text, it.role == "user") }
+    }
+
+    /** Empieza una conversación nueva (Apache sigue recordando la memoria permanente). */
+    fun startNewConversation() {
+        if (isLoading) return
+
+        conversationId = null
+        SessionStore.clearConversationId()
+        messages = listOf(ChatMessage("Nueva conversación. ¿En qué puedo ayudarte?", false))
     }
 
     /** Añade un mensaje "de Apache" sin pasar por el Core (avisos del modo escucha, errores locales...). */

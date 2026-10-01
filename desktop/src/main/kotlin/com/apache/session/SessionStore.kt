@@ -29,6 +29,13 @@ object SessionStore {
         }
     }
 
+    /** Olvida la conversación actual: el próximo mensaje empezará una nueva. */
+    fun clearConversationId() {
+        try {
+            if (sessionFile.exists()) sessionFile.delete()
+        } catch (e: Exception) {}
+    }
+
     /** Guarda el conversationId actual para poder recuperarlo en el próximo arranque. */
     fun saveConversationId(conversationId: Long?) {
         if (conversationId == null) return
