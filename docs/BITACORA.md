@@ -1,5 +1,115 @@
 # Bitácora de desarrollo — Apache
 
+## 01/10/2026 — feature/imagenes-horario
+
+### Objetivo
+
+Con Apache ya funcional, añadir dos capacidades nuevas: que Apache pueda enseñar imágenes en el chat (de 1 a 3 según la petición) y una ventana de **Horario** para organizar el día en bloques de tiempo, tanto a mano como pidiéndoselo a Apache.
+
+### Trabajo previo guardado
+
+* Antes de empezar se guardaron en un commit propio (`WIP: empaquetado...`) los cambios locales que no estaban commiteados en `desktop/build.gradle.kts` y `CoreProcessManager.kt` (copia de `java.exe` al runtime del instalador, `console = true` y búsqueda de Java por `JAVA_HOME` → `PATH` → `java.home`).
+* A partir de esta sesión se hace **un commit por cada paso** y se sube a GitHub en la rama `feature/imagenes-horario`, para no volver a perder trabajo.
+
+### Imágenes en el chat
+
+* Nueva tool `searchImages` (READ_ONLY) en el Core:
+  * Busca en **Wikimedia Commons** (sin API key) y, si no hay resultados o falla, en **Openverse**.
+  * Recibe `query` (mejor en inglés) y `count`, que se limita siempre a 1-3.
+  * Devuelve las imágenes como líneas `IMAGE|url|título|origen` dentro del resultado de la tool.
+* Nueva clase `ChatImage` en `agent`, con el formato de esas líneas y su lectura (`parseFromToolOutput`). Cualquier tool futura puede devolver imágenes con el mismo formato sin tocar el Agent.
+* `Agent` recoge las imágenes que aparezcan en los resultados de las tools durante el turno (máximo 3, sin repetir) y las devuelve en `AgentResult.Reply.images`.
+* `ChatResponse` incluye ahora `images` (`url`, `title`, `sourceUrl`).
+* Instrucción de sistema actualizada: cuándo usar imágenes, 1 para una cosa concreta y 2-3 para varias/comparaciones, y no escribir los enlaces en el texto.
+* Desktop:
+  * `ChatMessage` y `ChatResponse` llevan la lista de imágenes.
+  * `downloadImageBitmap` (`network/ImageApi.kt`) descarga la imagen con OkHttp, la decodifica con Skia y la guarda en una caché en memoria.
+  * Nuevo componente `ChatImages`: 1 imagen grande (380×260) o 2-3 miniaturas (230×170), con indicador de carga, aviso si falla y pie con el título. Clic → abre la página de origen en el navegador.
+  * `MessageBubble` dibuja las imágenes debajo del texto.
+
+### Horario
+
+* Nueva tool `planDaySchedule` (REVERSIBLE) en el Core: recibe `date` y una lista de `blocks` (`title`, `start`, `end`, `description`) y crea todos los bloques del día en **una sola llamada** (antes habría hecho falta una vuelta a Gemini por cada `createCalendarEvent`).
+* Los bloques son eventos normales del calendario con inicio y fin, así que se ven también en la sección Calendario.
+* El Agent añade la **fecha y hora actual** a la instrucción de sistema en cada turno, para que Gemini sepa qué es "hoy" o "mañana" sin llamar antes a `getCurrentTime`.
+* Instrucción de sistema: para organizar el día, consultar primero `getCalendarEvents` y luego crear todo con `planDaySchedule`, proponiendo horarios razonables en vez de preguntar demasiado.
+* Desktop — nueva sección **Horario** en la barra lateral (`ui/schedule`):
+  * `ScheduleController`: día seleccionado, bloques, formulario y petición a Apache.
+  * Navegación ◀ Hoy ▶ y resumen del día (número de bloques y horas planificadas).
+  * Línea de tiempo de 06:00 a 24:00 (se amplía si hay bloques antes), con línea roja de "ahora" en el día actual y desplazamiento automático a la hora actual.
+  * Los bloques que se solapan se colocan en columnas.
+  * Colores por estado: pendiente, atrasado y completado (mismos colores que Calendario).
+  * Clic en una hora vacía → nuevo bloque a esa hora; clic en un bloque → editar, marcar como hecho o eliminar (borrado lógico).
+  * **Organizar con Apache**: se escribe qué hay que hacer ese día y Apache reparte el día en bloques. La petición va por la misma conversación del chat, y al terminar el horario se recarga solo.
+  * Botón **Ventana aparte ↗**: abre el horario en una ventana propia más pequeña (diseño compacto con pestañas Día / Añadir / Apache) para tenerlo a la vista mientras se usa el resto de Apache.
+* `fetchCalendarEventsBetween(from, to)` en `CalendarApi` para pedir solo los eventos de un día.
+* `ChatController.runTurn` ahora devuelve el texto de la respuesta (o `null` si falla), para poder mostrarlo en Horario.
+* Ayuda actualizada con ejemplos de imágenes y de horario.
+
+### Problemas encontrados
+
+* En el entorno de esta sesión no hay acceso a Maven Central ni a los repositorios de Compose, así que no se ha podido ejecutar Gradle. El código del Core tocado se compiló con `kotlinc` 1.9.24 contra stubs de Spring/OkHttp/Jackson (sin errores) y se probaron aparte la lectura de líneas `IMAGE|` y el reparto de bloques solapados. El Desktop (Compose) se ha revisado a mano: **hay que compilarlo y probarlo en local**.
+
+### Estado actual
+
+* [x] Tool `searchImages` (Wikimedia Commons + Openverse)
+* [x] 1-3 imágenes por respuesta en `ChatResponse`
+* [x] Imágenes dibujadas en el chat del Desktop
+* [x] Tool `planDaySchedule`
+* [x] Fecha y hora actual en la instrucción de sistema
+* [x] Sección Horario con línea de tiempo diaria
+* [x] Crear / editar / completar / eliminar bloques desde Horario
+* [x] Organizar el día con Apache desde Horario
+* [x] Horario en ventana aparte
+* [ ] Compilar y probar en local (`gradlew :desktop:run`)
+* [ ] Guardar las imágenes en el historial para mostrarlas al recargar una conversación
+* [ ] Arrastrar bloques para moverlos o cambiar su duración
+* [ ] Que el usuario pueda adjuntar imágenes en el chat (Gemini acepta imágenes como entrada)
+
+### Decisiones de diseño
+
+* El Desktop descarga las imágenes; el Core solo pasa URLs. Así el Core no mueve binarios y el chat se pinta en cuanto llega el texto.
+* Las imágenes viajan como líneas `IMAGE|...` dentro del resultado de la tool, en lugar de un canal aparte, para no cambiar el contrato `Tool.execute(): String`.
+* Los bloques del horario reutilizan `calendar_event` (con `endAt`) en vez de crear una tabla nueva: un solo sitio para los eventos y sin migraciones de MySQL.
+
+## 14/09/2026 — fix-0.1: reorganización del Desktop, calendario y Core integrado
+
+### Objetivo
+
+Ordenar el código del Desktop, que se había concentrado en un `App.kt` enorme, terminar la interfaz del calendario y conseguir que el ejecutable arranque el Core por sí solo.
+
+### Trabajo realizado
+
+* `CalendarController` del Core con endpoints para listar (por rango `from`/`to`, por defecto 30 días), crear, editar, completar (`POST /events/{id}/complete`) y cancelar (`POST /events/{id}/cancel`, borrado lógico) eventos.
+* Interfaz de **Calendario** en el Desktop: formulario de nuevo evento / edición, lista de próximos eventos con estado (Confirmado, Atrasado, Completado), diálogo de cancelación y archivo de eventos completados.
+* El estado "Atrasado" no se guarda en MySQL: se calcula en el Desktop comparando con la hora actual.
+* Gran refactor del Desktop (`BIG CHANGES`): `App.kt` pasa de más de 3000 líneas a ser solo el punto de entrada que crea los controllers y elige la pantalla. Nueva estructura:
+  * `model/` — DTOs de chat, calendario, notificaciones y voz.
+  * `network/` — llamadas HTTP al Core (`ChatApi`, `CalendarApi`, `NotificationApi`, `VoiceApi`, `ApiClient`).
+  * `session/SessionStore` — `conversationId` persistido en `~/.apache/session.properties`.
+  * `ui/chat`, `ui/calendar`, `ui/voice`, `ui/notifications`, `ui/ayuda`, `ui/memoria`, `ui/components`, `ui/theme` (paleta `ApacheColors`).
+  * `util/` — utilidades de calendario y expresión regular de la wake word.
+* `CoreProcessManager`: el Desktop arranca el Core automáticamente.
+  * Si ya hay un Core escuchando en el puerto 8080 no lanza otro.
+  * Busca el jar del Core empaquetado como recurso (`/core/apache-core.jar`) y, en desarrollo, en las rutas de `core/build/libs`.
+  * Espera a que Spring Boot responda antes de abrir la interfaz y lo detiene al cerrar la ventana.
+* `desktop/build.gradle.kts`: `processResources` mete el `bootJar` del Core dentro de los recursos del Desktop, y la ventana inicial pasa a 1400×850.
+* Empaquetado (cambios guardados el 01/10 como WIP): tarea `copyJavaExecutable` que copia `java.exe` al runtime del instalador antes de `packageExe`, `console = true` en Windows y búsqueda de Java `JAVA_HOME` → `PATH` → `java.home` en `CoreProcessManager`.
+
+### Problemas encontrados
+
+* El runtime reducido que genera `jpackage` no incluye `java.exe`, así que el Desktop empaquetado no podía lanzar el Core como subproceso.
+
+### Estado actual
+
+* [x] Endpoints de calendario completos
+* [x] Interfaz de calendario con archivo de completados
+* [x] Desktop dividido por dominios (model / network / ui / util)
+* [x] El Desktop arranca y detiene el Core automáticamente
+* [x] Core empaquetado dentro del Desktop
+* [ ] Comprobar el instalador `.exe` en un equipo limpio
+* [ ] Avisar en la interfaz si MySQL no está disponible
+
 ## 13/09/2026 — fix/notifications-followup + voz + empaquetado
 
 ### Objetivo
@@ -63,6 +173,17 @@ Cerrar los pendientes detectados en la sesión anterior sobre notificaciones, a�
 * Job de purga o paginación para el histórico de notificaciones leídas, antes de que crezca sin límite.
 * Corregir los problemas de codificación UTF-8 detectados en la sesión anterior (`recordarÃ©`, etc.) en la consola/cliente.
 * Revisar y ampliar la cobertura de pruebas del flujo de recordatorios y notificaciones (hoy validado solo manualmente).
+
+## 13/09/2026 — feature/calendar-tasks-reminders (calendario y tareas)
+
+### Trabajo realizado
+
+* Capa de datos de calendario sobre MySQL: `CalendarRepository` (calendario por defecto del usuario, eventos, completar y cancelar con borrado lógico) y `CalendarService` con las validaciones (título obligatorio, fin no anterior al inicio).
+* Tools de calendario: `createCalendarEvent`, `getCalendarEvents`, `updateCalendarEvent` y `deleteCalendarEvent` (esta última pide confirmación al ser RECOVERABLE).
+* Tareas: `TaskRepository` + `TaskService` y tools `createTask`, `listTasks`, `completeTask`, `updateTask` y `deleteTask`.
+* Tools de recordatorios y notificaciones: `createReminder`, `listReminders`, `cancelReminder` y `listNotifications`.
+* `ToolDateParsing`: lectura tolerante de fechas (`yyyy-MM-ddTHH:mm` o `yyyy-MM-dd`) compartida por las tools de calendario, tareas y recordatorios.
+* `ApacheDefaults.DEFAULT_USER_ID` como único sitio del usuario por defecto de Apache 0.1.
 
 ## 13/09/2026 — feature/reminders-notifications
 
@@ -233,6 +354,16 @@ También se confirmó que Windows mostró correctamente la notificación del rec
 ### Siguiente fase
 
 Completar el sistema de **gestión de notificaciones**, asegurando la persistencia, lectura, descarte y sincronización entre **MySQL → Core → Desktop → Windows** antes de continuar con nuevas funcionalidades de Apache 0.1.
+
+## 12/09/2026 — Memoria y conversaciones en MySQL
+
+### Trabajo realizado
+
+* `MemoryRepository` + `MemoryService` sobre MySQL: las conversaciones y sus mensajes (usuario, modelo, llamadas a funciones y respuestas de funciones) se guardan en base de datos en lugar de en memoria.
+* El `Agent` usa `MemoryService` para recuperar el historial completo de cada turno.
+* `ChatRequest` / `ChatResponse` separados en `api/dto`, y nuevo `ConfirmRequest` para las confirmaciones.
+* Unificado `conversationId` como `Long` en Memory, Agent, API y Desktop.
+* El Desktop guarda el `conversationId` para continuar la conversación tras reiniciar.
 
 ## 12/09/2026 — feature/database
 
