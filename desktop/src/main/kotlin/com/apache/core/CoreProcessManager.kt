@@ -43,6 +43,14 @@ object CoreProcessManager {
         )
             .directory(coreJar.parentFile)
             .redirectErrorStream(true)
+            /*
+             * IMPORTANTE: la salida del Core tiene que ir a algún sitio que se
+             * vacíe. Si se deja en un pipe que nadie lee, en cuanto se llena
+             * (en Windows son pocos KB y el Core escribe logs en DEBUG) el
+             * Core se queda bloqueado escribiendo y deja de responder.
+             * Se guarda en ~/.apache/core.log para poder revisar errores.
+             */
+            .redirectOutput(ProcessBuilder.Redirect.to(coreLogFile()))
             .start()
 
         // Esperamos a que Spring Boot termine de iniciar.
@@ -53,6 +61,13 @@ object CoreProcessManager {
                 "El Core de Apache no ha podido iniciarse correctamente."
             )
         }
+    }
+
+    /** Archivo donde se guarda la salida del Core: ~/.apache/core.log (se sobrescribe en cada arranque). */
+    private fun coreLogFile(): File {
+        val directory = File(System.getProperty("user.home"), ".apache")
+        directory.mkdirs()
+        return File(directory, "core.log")
     }
 
     fun stop() {
