@@ -276,7 +276,7 @@ class ScheduleController(
     }
 
     companion object {
-        private val SPANISH = Locale("es", "ES")
+        private val SPANISH = Locale.forLanguageTag("es-ES")
         val HOUR: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
         private val DAY_LABEL: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE d 'de' MMMM", SPANISH)
         private val ISO: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME

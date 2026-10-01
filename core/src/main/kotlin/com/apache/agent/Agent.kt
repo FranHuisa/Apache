@@ -2,6 +2,7 @@ package com.apache.agent
 
 import com.apache.ai.GeminiClient
 import com.apache.ai.GeminiResult
+import com.apache.database.service.UserMemoryService
 import com.apache.memory.MemoryService
 import com.apache.security.PendingConfirmation
 import com.apache.security.PendingConfirmationStore
@@ -60,6 +61,13 @@ Si el usuario pide poner, buscar o reproducir una canción, artista o álbum
 concreto, usa playSong (en YouTube salvo que pida Spotify). Para pausar, pasar
 de canción o cambiar el volumen de lo que ya suena, usa musicControl.
 
+Tienes memoria permanente. Cuando el usuario diga "recuerda que..." o te cuente
+algo personal que seguirá siendo cierto (su nombre, gustos, alergias, rutinas,
+trabajo, personas importantes, cómo prefiere que le hables), guárdalo con
+rememberFact sin pedir permiso y díselo en una frase corta. Si te pide que
+olvides algo, usa forgetFact. Usa lo que sabes del usuario con naturalidad, sin
+recitarlo.
+
 Cuando el usuario quiera organizar su día o hacer un horario, consulta primero
 lo que ya tiene ese día con getCalendarEvents y después crea todos los bloques de
 una vez con planDaySchedule. Si te falta información importante (a qué hora
@@ -69,17 +77,22 @@ lista breve.
 """
 
 private val CURRENT_TIME_FORMAT: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("EEEE d 'de' MMMM 'de' yyyy, HH:mm", Locale("es", "ES"))
+    DateTimeFormatter.ofPattern("EEEE d 'de' MMMM 'de' yyyy, HH:mm", Locale.forLanguageTag("es-ES"))
 
 /**
  * Instrucción de sistema de cada turno: la fija más la fecha y hora actuales,
  * para que Gemini sepa qué día es "hoy" o "mañana" al organizar horarios
  * sin tener que llamar antes a getCurrentTime.
  */
-private fun systemInstructionForNow(): String =
+private fun systemInstructionForNow(userMemory: String): String =
     SYSTEM_INSTRUCTION +
         "\nFecha y hora actual del usuario: ${LocalDateTime.now().format(CURRENT_TIME_FORMAT)} " +
-        "(${LocalDate.now()})."
+        "(${LocalDate.now()})." +
+        if (userMemory.isBlank()) {
+            "\nTodavía no has guardado ningún dato del usuario en tu memoria."
+        } else {
+            "\n\nLo que recuerdas del usuario (memoria permanente):\n$userMemory"
+        }
 
 /**
  * Es el "Agent" del diagrama de arquitectura: el orquestador que conecta todas las piezas en cada
@@ -105,9 +118,23 @@ class Agent(
 
     private val permissionManager: PermissionManager,
 
-    private val memoryService: MemoryService
+    private val memoryService: MemoryService,
+
+    private val userMemoryService: UserMemoryService
 
 ) {
+
+    /**
+     * Datos de la memoria permanente para la instrucción de sistema. Si MySQL
+     * falla aquí, Apache sigue respondiendo (solo que sin esos datos).
+     */
+    private fun loadUserMemory(): String =
+        try {
+            userMemoryService.contextForPrompt(defaultUserId)
+        } catch (e: Exception) {
+            println("No se ha podido leer la memoria del usuario: ${e.message}")
+            ""
+        }
 
     /**
      * Apache 0.1 utiliza inicialmente el usuario `default`.
@@ -153,7 +180,7 @@ class Agent(
             val geminiResult =
                 geminiClient.sendMessage(
                     history,
-                    systemInstructionForNow()
+                    systemInstructionForNow(loadUserMemory())
                 )
         ) {
 

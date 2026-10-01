@@ -80,6 +80,29 @@ class DatabaseFactory(
             if (!hasEventId) {
                 exec("ALTER TABLE reminder ADD COLUMN event_id BIGINT NULL")
             }
+
+            /*
+             * Memoria a largo plazo. La tabla forma parte del esquema inicial de
+             * Apache 0.1, pero se crea aquí si falta para que la sección Memoria
+             * funcione también en instalaciones donde no se llegó a crear.
+             * Es aditivo: si la tabla ya existe, no se toca.
+             */
+            exec(
+                """
+                CREATE TABLE IF NOT EXISTS memory (
+                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    type VARCHAR(50) NOT NULL,
+                    `key` VARCHAR(255) NOT NULL,
+                    value TEXT NOT NULL,
+                    importance DOUBLE NOT NULL DEFAULT 0.5,
+                    confidence DOUBLE NOT NULL DEFAULT 1.0,
+                    expires_at DATETIME NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+                """.trimIndent()
+            )
         }
     }
 }
