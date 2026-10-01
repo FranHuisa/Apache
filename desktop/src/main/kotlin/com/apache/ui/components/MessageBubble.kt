@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,7 +30,10 @@ import com.apache.ui.theme.ApacheColors
  * dibujan debajo de la burbuja de texto.
  */
 @Composable
-fun MessageBubble(message: ChatMessage) {
+fun MessageBubble(
+    message: ChatMessage,
+    onConfirm: ((confirmationId: String, approved: Boolean) -> Unit)? = null
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start
@@ -46,6 +52,25 @@ fun MessageBubble(message: ChatMessage) {
                             color = if (message.isUser) Color.Black else Color.White,
                             fontSize = 15.sp
                         )
+                    }
+                }
+            }
+
+            // Acción pendiente de confirmar: botones Sí / No.
+            val confirmationId = message.confirmationId
+            if (confirmationId != null && onConfirm != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { onConfirm(confirmationId, true) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ApacheColors.accent,
+                            contentColor = Color.Black
+                        )
+                    ) { Text("Sí, hazlo") }
+
+                    OutlinedButton(onClick = { onConfirm(confirmationId, false) }) {
+                        Text("No, cancelar", color = ApacheColors.dangerSoft)
                     }
                 }
             }

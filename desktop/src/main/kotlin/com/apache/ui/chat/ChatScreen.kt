@@ -160,7 +160,9 @@ fun ChatScreen(chat: ChatController, voice: VoiceController) {
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            items(chat.messages) { chatMessage -> MessageBubble(chatMessage) }
+            items(chat.messages) { chatMessage ->
+                MessageBubble(chatMessage, onConfirm = { id, approved -> chat.confirm(id, approved) })
+            }
 
             if (chat.showThinking) {
                 item { MessageBubble(ChatMessage("Pensando...", false)) }

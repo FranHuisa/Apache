@@ -2,6 +2,7 @@ package com.apache.network
 
 import com.apache.model.ChatRequest
 import com.apache.model.ChatResponse
+import com.apache.model.ConfirmRequest
 import com.fasterxml.jackson.module.kotlin.readValue
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -14,6 +15,30 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * Esta función es bloqueante (red), así que debe ejecutarse siempre desde
  * Dispatchers.IO, nunca desde el hilo de la interfaz.
  */
+/**
+ * Confirma (o rechaza) una acción pendiente en el Core: POST /api/chat/confirm.
+ * Bloqueante: llamar desde Dispatchers.IO.
+ */
+fun confirmActionInCore(confirmationId: String, approved: Boolean): ChatResponse {
+    val json = objectMapper.writeValueAsString(ConfirmRequest(confirmationId, approved))
+
+    val request = Request.Builder()
+        .url("$CORE_BASE_URL/api/chat/confirm")
+        .post(json.toRequestBody(jsonMediaType))
+        .build()
+
+    httpClient.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+            throw Exception("El Core respondió con HTTP ${response.code}")
+        }
+
+        val responseBody =
+            response.body?.string() ?: throw Exception("El Core no devolvió ninguna respuesta.")
+
+        return objectMapper.readValue(responseBody)
+    }
+}
+
 fun sendMessageToCore(conversationId: Long?, message: String): ChatResponse {
 
     val json = objectMapper.writeValueAsString(
