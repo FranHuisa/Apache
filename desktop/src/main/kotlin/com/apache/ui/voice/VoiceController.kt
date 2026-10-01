@@ -1,5 +1,6 @@
 package com.apache.ui.voice
 
+import com.apache.session.SessionStore
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -40,10 +41,12 @@ class VoiceController(
         private set
 
     // El texto de la respuesta se sigue mostrando igual; silenciar solo omite el audio.
-    var isMuted by mutableStateOf(false)
+    // Se recuerda entre reinicios (~/.apache/session.properties).
+    var isMuted by mutableStateOf(SessionStore.loadVoiceMuted())
 
     fun toggleMute() {
         isMuted = !isMuted
+        SessionStore.saveVoiceMuted(isMuted)
     }
 
     /**
