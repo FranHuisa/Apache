@@ -51,7 +51,8 @@ fun ChatScreen(chat: ChatController, voice: VoiceController) {
     fun sendMessage() {
         val text = message.trim()
 
-        if (text.isNotBlank() && !chat.isLoading) {
+        // Se puede enviar solo con adjuntos (Apache preguntará qué ve en ellos).
+        if ((text.isNotBlank() || chat.pendingAttachments.isNotEmpty()) && !chat.isLoading) {
             message = ""
             chat.sendMessage(text)
         }
@@ -188,6 +189,33 @@ fun ChatScreen(chat: ChatController, voice: VoiceController) {
             Spacer(modifier = Modifier.height(10.dp))
         }
 
+        // Adjuntos preparados para el próximo mensaje (clic = quitar).
+        if (chat.pendingAttachments.isNotEmpty() || chat.isCapturing) {
+            Row(
+                modifier = Modifier.fillMaxWidth().widthIn(max = 900.dp).align(Alignment.CenterHorizontally),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                chat.pendingAttachments.forEach { attachment ->
+                    Surface(
+                        color = ApacheColors.mutedGreenBg,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.clickable { chat.removeAttachment(attachment) }
+                    ) {
+                        Text(
+                            text = "📎 ${attachment.name}  ✕",
+                            color = ApacheColors.accentSoft,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+                if (chat.isCapturing) {
+                    Text("Capturando pantalla...", color = ApacheColors.textMuted, fontSize = 13.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
         // Entrada de mensaje.
         Row(
                 modifier =
@@ -218,6 +246,26 @@ fun ChatScreen(chat: ChatController, voice: VoiceController) {
                                     unfocusedPlaceholderColor = Color(0xFF777777)
                             )
             )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Adjuntar archivos (imágenes, PDF, texto).
+            Surface(color = ApacheColors.mutedGreenBg, shape = RoundedCornerShape(14.dp)) {
+                IconButton(
+                    onClick = { chat.pickFiles() },
+                    enabled = !chat.isLoading && !voice.isRecording
+                ) { Text(text = "📎", fontSize = 20.sp) }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Adjuntar una captura de pantalla.
+            Surface(color = ApacheColors.mutedGreenBg, shape = RoundedCornerShape(14.dp)) {
+                IconButton(
+                    onClick = { chat.attachScreenshot() },
+                    enabled = !chat.isLoading && !chat.isCapturing && !voice.isRecording
+                ) { Text(text = "🖥", fontSize = 20.sp) }
+            }
 
             Spacer(modifier = Modifier.width(8.dp))
 

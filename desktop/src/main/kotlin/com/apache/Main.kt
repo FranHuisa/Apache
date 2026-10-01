@@ -22,6 +22,9 @@ fun main() = application {
         )
     )
 
+    // Para poder minimizar la ventana un momento al capturar la pantalla.
+    com.apache.util.AppWindow.state = windowState
+
     Window(
         onCloseRequest = {
             // Cierra el Core que haya sido iniciado por Apache Desktop.

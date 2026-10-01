@@ -3,12 +3,18 @@ package com.apache.ui.chat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.apache.model.ChatAttachment
 import com.apache.model.ChatMessage
 import com.apache.model.ChatResponse
 import com.apache.model.ConversationMessageDto
 import com.apache.network.confirmActionInCore
 import com.apache.network.sendMessageToCore
 import com.apache.session.SessionStore
+import com.apache.util.AppWindow
+import com.apache.util.captureScreenAttachment
+import com.apache.util.chooseFiles
+import com.apache.util.fileToAttachment
+import com.apache.util.screenRequestRegex
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -23,6 +29,9 @@ import kotlinx.coroutines.withContext
  * el mismo historial y el mismo `conversationId` (antes esto estaba duplicado
  * entre `processMessage` y `runVoiceTurn`).
  */
+/** Máximo de archivos adjuntos en un mismo mensaje. */
+private const val MAX_PENDING = 5
+
 private const val DAILY_SUMMARY_PROMPT =
     "(Mensaje automático al abrir Apache por primera vez hoy, no lo menciones.) " +
         "Dame mi resumen de hoy: salúdame por mi nombre si lo sabes, dime qué tengo hoy en el " +
@@ -142,8 +151,76 @@ class ChatController(private val scope: CoroutineScope) {
      * No reproduce la respuesta por voz.
      */
     fun sendMessage(text: String) {
-        if (text.isBlank() || isLoading) return
-        scope.launch { runTurn(text, speak = false) }
+        if ((text.isBlank() && pendingAttachments.isEmpty()) || isLoading) return
+
+        val attachments = pendingAttachments
+        pendingAttachments = emptyList()
+
+        scope.launch {
+            runTurn(
+                text.ifBlank { "¿Qué ves en esto?" },
+                speak = false,
+                attachments = attachments
+            )
+        }
+    }
+
+    // --- Adjuntos ---
+
+    /** Archivos preparados para enviarse con el próximo mensaje. */
+    var pendingAttachments by mutableStateOf<List<ChatAttachment>>(emptyList())
+        private set
+
+    var isCapturing by mutableStateOf(false)
+        private set
+
+    /** Abre el selector de archivos y añade los elegidos a los adjuntos pendientes. */
+    fun pickFiles() {
+        val files = try {
+            chooseFiles()
+        } catch (e: Exception) {
+            appendSystemMessage("No se ha podido abrir el selector de archivos: ${e.message}")
+            return
+        }
+        if (files.isEmpty()) return
+
+        scope.launch {
+            val results = withContext(Dispatchers.IO) { files.map { fileToAttachment(it) } }
+            pendingAttachments = (pendingAttachments + results.mapNotNull { it.first }).take(MAX_PENDING)
+            results.mapNotNull { it.second }.forEach { appendSystemMessage(it) }
+        }
+    }
+
+    /** Hace una captura de pantalla y la deja preparada para el próximo mensaje. */
+    fun attachScreenshot() {
+        if (isCapturing) return
+        scope.launch {
+            captureScreen()?.let { pendingAttachments = (pendingAttachments + it).take(MAX_PENDING) }
+        }
+    }
+
+    fun removeAttachment(attachment: ChatAttachment) {
+        pendingAttachments = pendingAttachments - attachment
+    }
+
+    /**
+     * Captura la pantalla minimizando Apache un momento para que no salga en
+     * la imagen. Devuelve null (y avisa en el chat) si falla.
+     */
+    private suspend fun captureScreen(): ChatAttachment? {
+        isCapturing = true
+        val window = AppWindow.state
+        return try {
+            window?.isMinimized = true
+            delay(600) // Tiempo para que Windows termine de ocultar la ventana.
+            withContext(Dispatchers.IO) { captureScreenAttachment() }
+        } catch (e: Exception) {
+            appendSystemMessage("No se ha podido capturar la pantalla: ${e.message}")
+            null
+        } finally {
+            window?.isMinimized = false
+            isCapturing = false
+        }
     }
 
     /**
@@ -161,12 +238,23 @@ class ChatController(private val scope: CoroutineScope) {
         text: String,
         speak: Boolean,
         showUserMessage: Boolean = true,
+        attachments: List<ChatAttachment> = emptyList(),
         // Debe ser el último parámetro: el modo voz lo pasa como lambda final.
         onReply: (suspend (String) -> Unit)? = null
     ): String? {
+        // «¿Qué hay en mi pantalla?» (escrito o por voz): se captura automáticamente.
+        val turnAttachments =
+            if (attachments.isEmpty() && screenRequestRegex.containsMatchIn(text)) {
+                listOfNotNull(captureScreen())
+            } else {
+                attachments
+            }
+
         // Los mensajes automáticos (p. ej. el resumen del día) no se muestran como si
         // los hubiera escrito el usuario.
-        if (showUserMessage) appendMessage(ChatMessage(text, true))
+        if (showUserMessage) {
+            appendMessage(ChatMessage(text, true, attachmentNames = turnAttachments.map { it.name }))
+        }
         isLoading = true
         showThinking = false
 
@@ -176,7 +264,9 @@ class ChatController(private val scope: CoroutineScope) {
         }
 
         try {
-            val response = withContext(Dispatchers.IO) { sendMessageToCore(conversationId, text) }
+            val response = withContext(Dispatchers.IO) {
+                sendMessageToCore(conversationId, text, turnAttachments)
+            }
             val reply = response.reply ?: response.warning ?: "Apache no devolvió una respuesta."
 
             conversationId = response.conversationId

@@ -13,14 +13,23 @@ data class ChatMessage(
     val isUser: Boolean,
     val images: List<ChatImage> = emptyList(),
     // Si no es null, el mensaje es una acción pendiente de confirmar (botones Sí / No).
-    val confirmationId: String? = null
+    val confirmationId: String? = null,
+    // Nombres de los archivos adjuntos por el usuario (solo para mostrarlos).
+    val attachmentNames: List<String> = emptyList()
 )
+
+// Archivo adjunto a un mensaje (imagen, captura, PDF o texto) en Base64.
+data class ChatAttachment(val name: String, val mimeType: String, val data: String)
 
 // DTO para confirmar o rechazar una acción pendiente.
 data class ConfirmRequest(val confirmationId: String, val approved: Boolean)
 
 // DTO que enviamos al Core.
-data class ChatRequest(val conversationId: Long? = null, val message: String)
+data class ChatRequest(
+    val conversationId: Long? = null,
+    val message: String,
+    val attachments: List<ChatAttachment> = emptyList()
+)
 
 // DTO que recibimos del Core.
 data class ChatResponse(

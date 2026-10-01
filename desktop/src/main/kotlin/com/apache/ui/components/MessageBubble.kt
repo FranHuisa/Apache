@@ -47,7 +47,11 @@ fun MessageBubble(
                 ) {
                     SelectionContainer {
                         Text(
-                            text = message.text,
+                            text = if (message.attachmentNames.isEmpty()) {
+                                message.text
+                            } else {
+                                message.text + "\n📎 " + message.attachmentNames.joinToString(", ")
+                            },
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                             color = if (message.isUser) Color.Black else Color.White,
                             fontSize = 15.sp

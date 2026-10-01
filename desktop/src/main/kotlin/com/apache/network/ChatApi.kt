@@ -1,5 +1,6 @@
 package com.apache.network
 
+import com.apache.model.ChatAttachment
 import com.apache.model.ChatRequest
 import com.apache.model.ChatResponse
 import com.apache.model.ConfirmRequest
@@ -39,10 +40,14 @@ fun confirmActionInCore(confirmationId: String, approved: Boolean): ChatResponse
     }
 }
 
-fun sendMessageToCore(conversationId: Long?, message: String): ChatResponse {
+fun sendMessageToCore(
+    conversationId: Long?,
+    message: String,
+    attachments: List<ChatAttachment> = emptyList()
+): ChatResponse {
 
     val json = objectMapper.writeValueAsString(
-        ChatRequest(conversationId = conversationId, message = message)
+        ChatRequest(conversationId = conversationId, message = message, attachments = attachments)
     )
 
     val request = Request.Builder()
