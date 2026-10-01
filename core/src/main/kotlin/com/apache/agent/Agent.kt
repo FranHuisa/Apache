@@ -8,6 +8,10 @@ import com.apache.security.PendingConfirmationStore
 import com.apache.security.PermissionDecision
 import com.apache.security.PermissionManager
 import com.apache.tools.ToolRegistry
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import org.springframework.stereotype.Component
 
 /**
@@ -51,7 +55,27 @@ el usuario quiera ver algo o cuando una imagen ayude de verdad a la respuesta.
 Muestra 1 imagen para una cosa concreta y 2 o 3 cuando pida varias, una
 comparación o variedad; nunca más de 3. Las imágenes aparecen solas debajo de tu
 mensaje: no escribas sus enlaces en el texto.
+
+Cuando el usuario quiera organizar su día o hacer un horario, consulta primero
+lo que ya tiene ese día con getCalendarEvents y después crea todos los bloques de
+una vez con planDaySchedule. Si te falta información importante (a qué hora
+empieza o termina el día, cuánto dura cada cosa), propón tú unos horarios
+razonables en vez de preguntar demasiado, y al final resume el horario en una
+lista breve.
 """
+
+private val CURRENT_TIME_FORMAT: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("EEEE d 'de' MMMM 'de' yyyy, HH:mm", Locale("es", "ES"))
+
+/**
+ * Instrucción de sistema de cada turno: la fija más la fecha y hora actuales,
+ * para que Gemini sepa qué día es "hoy" o "mañana" al organizar horarios
+ * sin tener que llamar antes a getCurrentTime.
+ */
+private fun systemInstructionForNow(): String =
+    SYSTEM_INSTRUCTION +
+        "\nFecha y hora actual del usuario: ${LocalDateTime.now().format(CURRENT_TIME_FORMAT)} " +
+        "(${LocalDate.now()})."
 
 /**
  * Es el "Agent" del diagrama de arquitectura: el orquestador que conecta todas las piezas en cada
@@ -125,7 +149,7 @@ class Agent(
             val geminiResult =
                 geminiClient.sendMessage(
                     history,
-                    SYSTEM_INSTRUCTION
+                    systemInstructionForNow()
                 )
         ) {
 
