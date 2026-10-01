@@ -20,6 +20,30 @@ private data class HelpSection(val title: String, val examples: List<String>)
 
 private val helpSections = listOf(
     HelpSection(
+        "Internet",
+        listOf("«¿Quién ganó ayer el partido del Madrid?»", "«¿Qué estrenos hay este fin de semana?»")
+    ),
+    HelpSection(
+        "Pantalla y archivos adjuntos",
+        listOf(
+            "«¿Qué hay en mi pantalla?» (hace la captura sola)",
+            "Botón 📎 para adjuntar imágenes, PDF o texto y preguntar sobre ellos",
+            "Botón 🖥 para adjuntar una captura de pantalla"
+        )
+    ),
+    HelpSection(
+        "Archivos del ordenador",
+        listOf(
+            "«Busca mis facturas en PDF»",
+            "«Ábreme lo último que he descargado»",
+            "«Enséñame dónde está el CV»"
+        )
+    ),
+    HelpSection(
+        "Casa (Smart Home)",
+        listOf("«Enciende la luz del salón»", "«Apaga el enchufe del escritorio»", "«¿Qué dispositivos tengo?»")
+    ),
+    HelpSection(
         "Música",
         listOf(
             "«Pon música»",
@@ -96,13 +120,19 @@ fun AyudaScreen() {
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = "• Aplicaciones: abrir, cerrar o comprobar si una aplicación está abierta.\n" +
-                "• Música: poner una canción concreta (YouTube), reproducir, pausar, cambiar de pista, consultar lo que suena y ajustar el volumen.\n" +
+                "• Música: poner una canción concreta (Spotify si lo conectas, si no YouTube), reproducir, pausar, cambiar de pista, consultar lo que suena y ajustar el volumen.\n" +
                 "• Tiempo: consultar el tiempo actual y la previsión.\n" +
                 "• Sistema: ver recursos e información del ordenador.\n" +
                 "• Fecha y hora: consultar la hora actual.\n" +
                 "• Imágenes: enseñar de 1 a 3 imágenes en el chat cuando quieres ver algo.\n" +
                 "• Horario: organizar un día en bloques (sección Horario o pidiéndoselo en el chat).\n" +
-                "• Memoria: recordar datos sobre ti entre conversaciones (sección Memoria para verlos y editarlos).",
+                "• Memoria: recordar datos sobre ti entre conversaciones (sección Memoria para verlos y editarlos).\n" +
+                "• Internet: buscar noticias, resultados y cualquier dato actual.\n" +
+                "• Pantalla y adjuntos: ver tu pantalla, imágenes, PDFs o textos y responder sobre ellos.\n" +
+                "• Archivos: buscar, ver los recientes y abrir archivos de tus carpetas.\n" +
+                "• Casa: encender y apagar dispositivos por MQTT (si los configuras).\n" +
+                "• Al abrir Apache por primera vez cada día te da un resumen del día.\n" +
+                "• Las acciones delicadas (como borrar un evento) piden confirmación con botones Sí / No.",
             color = ApacheColors.textCalendarBody,
             fontSize = 15.sp
         )
@@ -119,6 +149,33 @@ fun AyudaScreen() {
 
             Spacer(modifier = Modifier.height(20.dp))
         }
+
+        Text(text = "Conectar Spotify (opcional, necesita Premium)", color = ApacheColors.accent, fontSize = 17.sp)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "1. Entra en developer.spotify.com, inicia sesión y crea una app (Create app).\n" +
+                "2. En Redirect URIs pon exactamente: http://127.0.0.1:8080/api/spotify/callback\n" +
+                "3. Marca «Web API», guarda y copia el Client ID.\n" +
+                "4. En PowerShell: setx SPOTIFY_CLIENT_ID \"tu_client_id\" y vuelve a abrir Apache.\n" +
+                "5. Dile a Apache «conecta mi Spotify» y acepta en el navegador. Solo hay que hacerlo una vez.\n" +
+                "Sin esto, Apache pone las canciones en YouTube.",
+            color = ApacheColors.textCalendarBody,
+            fontSize = 15.sp
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(text = "Configurar la casa (opcional)", color = ApacheColors.accent, fontSize = 17.sp)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "Copia docs/smarthome.example.json del proyecto a la carpeta .apache de tu usuario " +
+                "con el nombre smarthome.json, y pon la dirección de tu broker MQTT y tus dispositivos " +
+                "(nombre y topic). No hace falta reiniciar Apache.",
+            color = ApacheColors.textCalendarBody,
+            fontSize = 15.sp
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
 
         Text(text = "Control por voz", color = ApacheColors.accent, fontSize = 17.sp)
         Spacer(modifier = Modifier.height(6.dp))
