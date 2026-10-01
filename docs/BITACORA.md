@@ -57,6 +57,27 @@ Con Apache ya funcional, añadir dos capacidades nuevas: que Apache pueda enseñ
 * Instrucción de sistema: `playSong` para poner algo concreto, `musicControl` para controlar lo que ya suena.
 * Ayuda actualizada con ejemplos («Pon Bohemian Rhapsody de Queen», «Busca la canción Despacito»).
 
+### Memoria permanente y sección Memoria
+
+* La tabla `memory` existía en el esquema desde el 12/09, pero nada la usaba y la sección Memoria del Desktop era solo un texto de "próximamente".
+* Core:
+  * `UserMemoryRepository` + `UserMemoryService` sobre `memory` (distintos de `MemoryRepository`, que es el historial de cada conversación).
+  * Si ya hay un dato con la misma clave (sin distinguir mayúsculas), se actualiza en vez de duplicarse.
+  * Categorías: `personal`, `preferencia`, `rutina`, `trabajo`, `salud` y `otro`.
+  * Tools `rememberFact` y `forgetFact` (REVERSIBLE). Apache guarda solo lo personal y duradero cuando se lo cuentas o cuando dices «recuerda que...».
+  * En cada turno, el Agent añade a la instrucción de sistema lo que recuerda del usuario (los 60 datos más importantes). Si MySQL falla en ese paso, Apache sigue respondiendo sin esos datos.
+  * `DatabaseFactory` crea la tabla `memory` si falta (`CREATE TABLE IF NOT EXISTS`, aditivo).
+  * Nueva API `/api/memory` (listar, crear, editar y borrar datos) y `/api/memory/conversations` (lista de conversaciones con título sacado del primer mensaje, y sus mensajes visibles, sin las llamadas internas a tools).
+* Desktop, sección **Memoria**:
+  * Pestaña «Lo que sabe de ti»: datos agrupados por categoría, con formulario para añadir, editar u olvidar.
+  * Pestaña «Conversaciones»: historial de conversaciones, vista de los mensajes, botón «Retomar en el chat» y «+ Nueva conversación».
+  * `ChatController.openConversation` / `startNewConversation` y `SessionStore.clearConversationId`.
+
+### Arreglo: el Core se bloqueaba al lanzarlo desde el Desktop
+
+* `CoreProcessManager` arrancaba el Core sin leer su salida. Con los logs en DEBUG, el pipe se llenaba (en Windows es de pocos KB) y el Core dejaba de responder.
+* Ahora la salida se redirige a `~/.apache/core.log`, que además sirve para revisar errores.
+
 ### Problemas encontrados
 
 * En el entorno de esta sesión no hay acceso a Maven Central ni a los repositorios de Compose, así que no se ha podido ejecutar Gradle. El código del Core tocado se compiló con `kotlinc` 1.9.24 contra stubs de Spring/OkHttp/Jackson (sin errores) y se probaron aparte la lectura de líneas `IMAGE|` y el reparto de bloques solapados. El Desktop (Compose) se ha revisado a mano: **hay que compilarlo y probarlo en local**.
@@ -73,11 +94,15 @@ Con Apache ya funcional, añadir dos capacidades nuevas: que Apache pueda enseñ
 * [x] Organizar el día con Apache desde Horario
 * [x] Horario en ventana aparte
 * [x] Tool `playSong` (YouTube; Spotify solo abre la búsqueda)
+* [x] Memoria permanente (`rememberFact` / `forgetFact`) en el contexto de Gemini
+* [x] Sección Memoria con datos editables e historial de conversaciones
+* [x] Salida del Core redirigida a `~/.apache/core.log`
 * [ ] Compilar y probar en local (`gradlew :desktop:run`)
 * [ ] Guardar las imágenes en el historial para mostrarlas al recargar una conversación
 * [ ] Arrastrar bloques para moverlos o cambiar su duración
 * [ ] Que el usuario pueda adjuntar imágenes en el chat (Gemini acepta imágenes como entrada)
 * [ ] Integrar la API de Spotify (OAuth) para poner canciones concretas también en Spotify
+* [ ] Botones de confirmar/cancelar en el chat para las acciones RECOVERABLE (hoy el Desktop solo muestra el aviso)
 
 ### Decisiones de diseño
 

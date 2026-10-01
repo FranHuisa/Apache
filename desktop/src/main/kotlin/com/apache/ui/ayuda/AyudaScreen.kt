@@ -52,6 +52,15 @@ private val helpSections = listOf(
         )
     ),
     HelpSection(
+        "Memoria",
+        listOf(
+            "«Recuerda que me llamo Fran»",
+            "«Mi comida favorita es la pizza»",
+            "«¿Qué sabes de mí?»",
+            "«Olvida mi comida favorita»"
+        )
+    ),
+    HelpSection(
         "Horario",
         listOf(
             "«Organízame el día: estudiar 3 h, gimnasio y compra»",
@@ -92,7 +101,8 @@ fun AyudaScreen() {
                 "• Sistema: ver recursos e información del ordenador.\n" +
                 "• Fecha y hora: consultar la hora actual.\n" +
                 "• Imágenes: enseñar de 1 a 3 imágenes en el chat cuando quieres ver algo.\n" +
-                "• Horario: organizar un día en bloques (sección Horario o pidiéndoselo en el chat).",
+                "• Horario: organizar un día en bloques (sección Horario o pidiéndoselo en el chat).\n" +
+                "• Memoria: recordar datos sobre ti entre conversaciones (sección Memoria para verlos y editarlos).",
             color = ApacheColors.textCalendarBody,
             fontSize = 15.sp
         )
