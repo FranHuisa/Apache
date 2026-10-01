@@ -7,6 +7,7 @@ import com.apache.api.dto.ChatRequest
 import com.apache.api.dto.ChatImageDto
 import com.apache.api.dto.ChatResponse
 import com.apache.api.dto.ConfirmRequest
+import com.apache.tools.ShownImagesStore
 import org.springframework.web.bind.annotation.*
 
 /**
@@ -20,7 +21,10 @@ import org.springframework.web.bind.annotation.*
  */
 @RestController
 @RequestMapping("/api/chat")
-class ChatController(private val agent: Agent) {
+class ChatController(
+    private val agent: Agent,
+    private val shownImages: ShownImagesStore
+) {
 
     @PostMapping
     fun chat(@RequestBody request: ChatRequest): ChatResponse =
@@ -66,11 +70,11 @@ class ChatController(private val agent: Agent) {
     }
 
     private fun toResponse(conversationId: Long?, result: AgentResult): ChatResponse = when (result) {
-        is AgentResult.Reply -> ChatResponse(
-            conversationId = conversationId,
-            reply = result.text,
-            images = result.images.map { ChatImageDto(it.url, it.title, it.sourceUrl) }
-        )
+        is AgentResult.Reply -> {
+            // Para poder decir luego "guarda la segunda".
+            shownImages.remember(result.images)
+            replyResponse(conversationId, result)
+        }
         is AgentResult.NeedsConfirmation -> ChatResponse(
             conversationId = conversationId,
             needsConfirmation = true,
@@ -78,4 +82,10 @@ class ChatController(private val agent: Agent) {
             warning = result.warning
         )
     }
+
+    private fun replyResponse(conversationId: Long?, result: AgentResult.Reply) = ChatResponse(
+            conversationId = conversationId,
+            reply = result.text,
+            images = result.images.map { ChatImageDto(it.url, it.title, it.sourceUrl) }
+        )
 }
