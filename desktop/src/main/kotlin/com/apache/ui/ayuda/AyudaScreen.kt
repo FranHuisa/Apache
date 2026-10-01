@@ -39,7 +39,23 @@ private val helpSections = listOf(
         )
     ),
     HelpSection("Sistema", listOf("«¿Qué recursos está usando mi PC?»")),
-    HelpSection("Tiempo", listOf("«¿Qué tiempo hace mañana?»"))
+    HelpSection("Tiempo", listOf("«¿Qué tiempo hace mañana?»")),
+    HelpSection(
+        "Imágenes",
+        listOf(
+            "«Enséñame un ajolote»",
+            "«¿Cómo es la Sagrada Familia?»",
+            "«Muéstrame tres razas de perro pequeñas»"
+        )
+    ),
+    HelpSection(
+        "Horario",
+        listOf(
+            "«Organízame el día: estudiar 3 h, gimnasio y compra»",
+            "«Hazme un horario para mañana de 9 a 18»",
+            "«¿Qué tengo hoy?»"
+        )
+    )
 )
 
 @Composable
@@ -71,7 +87,9 @@ fun AyudaScreen() {
                 "• Música: reproducir, pausar, cambiar de pista, consultar lo que suena y ajustar el volumen.\n" +
                 "• Tiempo: consultar el tiempo actual y la previsión.\n" +
                 "• Sistema: ver recursos e información del ordenador.\n" +
-                "• Fecha y hora: consultar la hora actual.",
+                "• Fecha y hora: consultar la hora actual.\n" +
+                "• Imágenes: enseñar de 1 a 3 imágenes en el chat cuando quieres ver algo.\n" +
+                "• Horario: organizar un día en bloques (sección Horario o pidiéndoselo en el chat).",
             color = ApacheColors.textCalendarBody,
             fontSize = 15.sp
         )
