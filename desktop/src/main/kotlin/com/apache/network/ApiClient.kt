@@ -24,7 +24,7 @@ const val CORE_BASE_URL = "http://localhost:8080"
  */
 val httpClient: OkHttpClient = OkHttpClient.Builder()
     .connectTimeout(Duration.ofSeconds(10))
-    .readTimeout(Duration.ofSeconds(150))
+    .readTimeout(Duration.ofSeconds(240))
     .writeTimeout(Duration.ofSeconds(60))
     .build()
 

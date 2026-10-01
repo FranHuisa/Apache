@@ -46,7 +46,10 @@ class WebSearchTool(
         "required" to listOf("query")
     )
 
-    private val http = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(40)).build()
+    private val http = OkHttpClient.Builder()
+        .readTimeout(Duration.ofSeconds(40))
+        .callTimeout(Duration.ofSeconds(45))
+        .build()
     private val mapper = ObjectMapper()
 
     override fun execute(args: Map<String, Any?>): String {

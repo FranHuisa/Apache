@@ -42,7 +42,13 @@ class GeminiClient(
 ) {
 
         // 60 s: con imágenes o PDFs adjuntos Gemini tarda más en responder.
-        private val http = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(60)).build()
+        // OkHttp corta por defecto a los 10 s sin recibir datos (readTimeout), y Gemini
+        // puede tardar más en empezar a responder cuando está saturado o hay adjuntos.
+        private val http = OkHttpClient.Builder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .readTimeout(Duration.ofSeconds(45))
+                .callTimeout(Duration.ofSeconds(60))
+                .build()
 
         private val mapper = ObjectMapper()
 
@@ -321,8 +327,19 @@ class GeminiClient(
         private fun executeWithRetry(request: Request): okhttp3.Response {
                 val waits = listOf(1_000L, 3_000L, 6_000L)
 
+                var timeoutRetried = false
+
                 for (wait in waits) {
-                        val response = http.newCall(request).execute()
+                        val response = try {
+                                http.newCall(request).execute()
+                        } catch (e: java.io.InterruptedIOException) {
+                                // Tiempo agotado: se reintenta una sola vez (si vuelve a pasar,
+                                // Gemini está demasiado lento y es mejor avisar al usuario).
+                                if (timeoutRetried) throw e
+                                timeoutRetried = true
+                                println("Gemini no responde a tiempo, reintentando...")
+                                continue
+                        }
                         if (response.code != 503 && response.code != 429) return response
 
                         println("Gemini ocupado (${response.code}), reintentando en ${wait / 1000} s...")

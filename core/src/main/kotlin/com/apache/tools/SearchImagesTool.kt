@@ -75,7 +75,10 @@ class SearchImagesTool(
     )
 
     private val http = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(15)).build()
-    private val geminiHttp = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(40)).build()
+    private val geminiHttp = OkHttpClient.Builder()
+        .readTimeout(Duration.ofSeconds(30))
+        .callTimeout(Duration.ofSeconds(35))
+        .build()
     private val mapper = ObjectMapper()
 
     /** URLs enseñadas recientemente (las últimas [RECENT_LIMIT]) para no repetirlas. */
