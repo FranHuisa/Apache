@@ -1,0 +1,22 @@
+{
+  "broker": "tcp://192.168.1.50:1883",
+  "username": "",
+  "password": "",
+  "devices": [
+    {
+      "id": "luz_salon",
+      "name": "Luz del salón",
+      "room": "salón",
+      "topic": "casa/salon/luz/set",
+      "onPayload": "ON",
+      "offPayload": "OFF",
+      "togglePayload": "TOGGLE"
+    },
+    {
+      "id": "enchufe_escritorio",
+      "name": "Enchufe del escritorio",
+      "room": "habitación",
+      "topic": "casa/habitacion/enchufe/set"
+    }
+  ]
+}

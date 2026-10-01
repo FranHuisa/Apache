@@ -40,6 +40,10 @@ dependencies {
     // Controlar el volumen maestro de Windows desde Kotlin/Java.
     implementation("com.github.bjoernpetersen:volctl:3.0.0")
 
+    // Cliente MQTT para Smart Home (luces, enchufes, ESP32...). Solo se conecta si
+    // existe ~/.apache/smarthome.json.
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
+
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
 

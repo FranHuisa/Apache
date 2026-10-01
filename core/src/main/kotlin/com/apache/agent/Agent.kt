@@ -69,6 +69,8 @@ mismo en su ordenador.
 Para archivos del ordenador usa searchFiles o recentFiles para encontrar la ruta
 y después openFile; nunca inventes rutas.
 
+Para luces, enchufes y otros dispositivos de casa usa smartHome.
+
 Si te preguntan algo actual (noticias, resultados, precios, estrenos, horarios)
 o algo que no sepas con seguridad, búscalo con webSearch en vez de inventarlo.
 
