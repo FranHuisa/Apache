@@ -117,27 +117,5 @@ class PlaySongTool(
         }
     }
 
-    /**
-     * Abre una URL (o URI tipo spotify:) con el programa predeterminado del sistema.
-     *
-     * No se usa java.awt.Desktop porque Spring Boot arranca en modo headless.
-     * En Windows se usa `rundll32 url.dll,FileProtocolHandler`, que no pasa por
-     * cmd y por tanto no tiene problemas con los '&' de la URL.
-     */
-    private fun openUrl(url: String): Boolean {
-        val os = System.getProperty("os.name").lowercase()
-
-        val command = when {
-            os.contains("win") -> listOf("rundll32", "url.dll,FileProtocolHandler", url)
-            os.contains("mac") -> listOf("open", url)
-            else -> listOf("xdg-open", url)
-        }
-
-        return try {
-            ProcessBuilder(command).start()
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
+    private fun openUrl(url: String): Boolean = SystemOpener.open(url)
 }
