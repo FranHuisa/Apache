@@ -61,8 +61,15 @@ class ChatController(private val scope: CoroutineScope) {
      *
      * Es una función suspend para poder encadenarse directamente desde el modo
      * escucha (voz) sin duplicar la lógica de red.
+     *
+     * Devuelve el texto de la respuesta (o null si no se pudo hablar con el
+     * Core), para que otras pantallas como Horario puedan mostrarlo.
      */
-    suspend fun runTurn(text: String, speak: Boolean, onReply: (suspend (String) -> Unit)? = null) {
+    suspend fun runTurn(
+        text: String,
+        speak: Boolean,
+        onReply: (suspend (String) -> Unit)? = null
+    ): String? {
         appendMessage(ChatMessage(text, true))
         isLoading = true
         showThinking = false
@@ -83,8 +90,11 @@ class ChatController(private val scope: CoroutineScope) {
             if (speak) {
                 onReply?.invoke(reply)
             }
+
+            return reply
         } catch (e: Exception) {
             appendMessage(ChatMessage("No puedo conectar con Apache Core: ${e.message}", false))
+            return null
         } finally {
             thinkingJob.cancel()
             isLoading = false

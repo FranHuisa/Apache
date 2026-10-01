@@ -24,9 +24,13 @@ import com.apache.ui.components.NotificationsOverlay
 import com.apache.ui.components.Sidebar
 import com.apache.ui.memoria.MemoriaScreen
 import com.apache.ui.notifications.NotificationsController
+import com.apache.ui.schedule.ScheduleController
+import com.apache.ui.schedule.ScheduleScreen
 import com.apache.ui.theme.ApacheColors
 import com.apache.ui.voice.VoiceController
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.rememberWindowState
 /**
  * Punto de entrada de la interfaz de Apache Desktop.
  *
@@ -42,6 +46,11 @@ fun App() {
     val chatController = remember { ChatController(scope) }
     val calendarController = remember { CalendarController(scope) }
     val notificationsController = remember { NotificationsController(scope) }
+    val scheduleController = remember { ScheduleController(scope, chatController) }
+
+    // El Horario también puede abrirse en una ventana aparte (más pequeña) para
+    // tenerlo a la vista mientras se usa el resto de Apache.
+    var scheduleWindowOpen by remember { mutableStateOf(false) }
 
     // El VoiceController necesita poder hablar la respuesta de un turno de chat,
     // pero ChatController no debe conocer a VoiceController (evitamos acoplar
@@ -76,6 +85,10 @@ fun App() {
                     when (selectedSection) {
                         "Chat" -> ChatScreen(chatController, voiceController)
                         "Calendario" -> CalendarScreen(calendarController)
+                        "Horario" -> ScheduleScreen(
+                            scheduleController,
+                            onOpenWindow = if (scheduleWindowOpen) null else ({ scheduleWindowOpen = true })
+                        )
                         "Memoria" -> MemoriaScreen()
                         "Ayuda" -> AyudaScreen()
                     }
@@ -86,6 +99,20 @@ fun App() {
                         notifications = notificationsController.pending,
                         onDismiss = { notificationsController.dismiss(it) }
                     )
+                }
+            }
+        }
+
+        if (scheduleWindowOpen) {
+            Window(
+                onCloseRequest = { scheduleWindowOpen = false },
+                title = "Apache · Horario",
+                state = rememberWindowState(width = 560.dp, height = 860.dp)
+            ) {
+                MaterialTheme {
+                    Surface(modifier = Modifier.fillMaxSize(), color = ApacheColors.background) {
+                        ScheduleScreen(scheduleController)
+                    }
                 }
             }
         }

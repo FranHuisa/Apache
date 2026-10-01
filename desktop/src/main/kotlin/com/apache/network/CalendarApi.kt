@@ -4,6 +4,7 @@ import com.apache.model.CalendarEventDto
 import com.apache.model.CreateCalendarEventDto
 import com.apache.model.UpdateCalendarEventDto
 import com.fasterxml.jackson.module.kotlin.readValue
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -12,6 +13,30 @@ fun fetchCalendarEvents(): List<CalendarEventDto> {
         .url("$CORE_BASE_URL/api/calendar/events")
         .get()
         .build()
+
+    httpClient.newCall(request).execute().use { response ->
+        val bodyText = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            throw RuntimeException("Error del Core: ${response.code}")
+        }
+
+        return objectMapper.readValue(bodyText)
+    }
+}
+
+/**
+ * Eventos (no cancelados) cuyo inicio cae entre [from] y [to], ambos en
+ * formato ISO 'yyyy-MM-ddTHH:mm:ss'. Lo usa la ventana Horario para pedir
+ * solo los eventos de un día.
+ */
+fun fetchCalendarEventsBetween(from: String, to: String): List<CalendarEventDto> {
+    val url = "$CORE_BASE_URL/api/calendar/events".toHttpUrl().newBuilder()
+        .addQueryParameter("from", from)
+        .addQueryParameter("to", to)
+        .build()
+
+    val request = Request.Builder().url(url).get().build()
 
     httpClient.newCall(request).execute().use { response ->
         val bodyText = response.body?.string().orEmpty()
