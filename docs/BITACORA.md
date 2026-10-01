@@ -1,5 +1,66 @@
 # Bitácora de desarrollo — Apache
 
+## 01/10/2026 (noche) — feature/mejoras
+
+### Objetivo
+
+Con imágenes, horario, música y memoria ya funcionando y fusionados en `main`, arreglar los fallos pendientes y añadir otra tanda de capacidades: confirmaciones desde la interfaz, avisos del horario, resumen diario, búsqueda en internet, adjuntos y pantalla, archivos, Spotify por API y una base de Smart Home.
+
+### Trabajo realizado
+
+* **Fusión**: `feature/imagenes-horario` fusionada en `main` (avance directo, sin conflictos). Lo nuevo va en `feature/mejoras`.
+* **Confirmaciones con botones**: si una acción necesita confirmación (RECOVERABLE/DESTRUCTIVE), el chat muestra «Sí, hazlo» / «No, cancelar» y llama a `/api/chat/confirm`. Antes el Desktop solo mostraba el aviso y la acción se quedaba esperando para siempre.
+  * Arreglado además en el Core: el resultado de una acción confirmada o cancelada se guardaba como `nombre\nresultado` sin el id final, y `GeminiClient` lo leía como vacío. Ahora se guarda con el id de la `functionCall` original (`PendingConfirmation.callId`).
+* **Silencio de voz persistente**: `SessionStore` reescrito para guardar varias claves (`conversationId`, `voiceMuted`, `lastSummaryDate`) sin pisarse entre ellas.
+* **Avisos del horario**: `ScheduleBlockNotifier` (cada 30 s) crea una notificación de tipo `schedule` cuando empieza un evento o bloque; el Desktop la muestra como aviso de Windows igual que los recordatorios. No avisa de lo que ya había empezado antes de arrancar el Core.
+* **Resumen del día**: la primera vez que se abre Apache cada día se pide un resumen (calendario/horario, recordatorios, tareas y tiempo si sabe la ciudad). La petición no aparece en el chat, solo la respuesta.
+* **Búsqueda en internet**: tool `webSearch`, que hace una llamada aparte a Gemini con la tool `google_search` y devuelve la respuesta con sus fuentes. Va aparte para no mezclar la búsqueda de Google con el function calling de la conversación principal.
+* **Adjuntos y pantalla**:
+  * `ChatRequest.attachments` (Base64) → `GeminiAttachment` → `inline_data` en el último mensaje del usuario del turno. En MySQL solo se guarda el nombre del archivo.
+  * Desktop: botón 📎 (imágenes, PDF y texto; máximo 10 MB y 5 por mensaje) y botón 🖥 (captura).
+  * «¿Qué hay en mi pantalla?» (escrito o por voz) hace la captura sola. Apache se minimiza 0,6 s para no salir en ella (`AppWindow`). La captura se reduce a 1600 px de ancho en JPEG.
+* **Archivos**: tools `searchFiles`, `recentFiles` y `openFile`.
+  * Carpetas personales resueltas también dentro de OneDrive y con nombres en español.
+  * Búsqueda sin tildes, con límite de profundidad (6) y de archivos visitados (60 000); se salta `node_modules`, `.git`, `build`...
+  * `openFile` no abre ejecutables ni scripts (`.exe`, `.bat`, `.ps1`, `.jar`...), solo puede mostrarlos en el explorador.
+  * `SystemOpener` compartido (`rundll32 url.dll,FileProtocolHandler` / `explorer /select`), también usado por `playSong`.
+* **Spotify por API (opcional)**: `SpotifyClient` con OAuth Authorization Code + PKCE (sin client secret).
+  * Endpoints `/api/spotify/login`, `/callback` y `/status`, y tool `connectSpotify`.
+  * El refresh token se guarda en `~/.apache/spotify.properties`.
+  * `playSong` usa Spotify por defecto si está conectado; si no hay ningún dispositivo de Spotify activo, abre la app y espera hasta 8 s. Con un 403 avisa de que hace falta Premium y ofrece YouTube.
+  * Se activa con la variable de entorno `SPOTIFY_CLIENT_ID`; vacía = todo sigue con YouTube.
+* **Smart Home (base)**: dependencia Paho MQTT, `SmartHomeService` y tool `smartHome` (`list`, `on`, `off`, `toggle`, `set`).
+  * Configuración en `~/.apache/smarthome.json`, con un ejemplo en `docs/smarthome.example.json`. Se relee en cada orden; sin el archivo no se conecta a nada.
+* **Timeouts**: el cliente HTTP del Desktop tenía el `readTimeout` por defecto de OkHttp (10 s), y los turnos largos (varias tools, búsqueda, adjuntos) se daban por fallidos aunque el Core los terminara. Ahora es de 150 s; la llamada a Gemini en el Core pasa de 30 s a 60 s.
+* Instrucción de sistema, Ayuda (con pasos para Spotify y la casa) y `ROADMAP.MD` actualizados.
+
+### Problemas encontrados
+
+* Sigue sin haber acceso a Maven/Gradle en el entorno de desarrollo remoto. Se compiló con `kotlinc` contra stubs todo lo que no depende de Exposed ni de Compose, y se probaron la detección de «¿qué hay en mi pantalla?», la lectura de adjuntos y la búsqueda de archivos (incluida la búsqueda sin tildes). El código de Compose y la nueva dependencia MQTT hay que comprobarlos al compilar en local.
+
+### Estado actual
+
+* [x] `main` al día con imágenes, horario, música y memoria
+* [x] Botones de confirmar acciones + arreglo del resultado vacío tras confirmar
+* [x] Silencio de voz persistente
+* [x] Avisos al empezar bloques del horario
+* [x] Resumen del día
+* [x] Búsqueda en internet
+* [x] Adjuntos (imágenes, PDF, texto) y captura de pantalla
+* [x] Buscar, listar recientes y abrir archivos
+* [x] Spotify por API (opcional, Premium)
+* [x] Base de Smart Home por MQTT (opcional)
+* [ ] Compilar y probar en local
+* [ ] Confirmar acciones por voz («sí» / «no»)
+* [ ] Firmware de ejemplo para ESP32 y estado de los dispositivos en la interfaz
+* [ ] Mover / renombrar / organizar archivos (con confirmación)
+
+### Decisiones de diseño
+
+* La búsqueda en internet es una tool más (y no la tool `google_search` en la petición principal) para no depender de que el modelo permita combinarla con function calling.
+* Los adjuntos no se guardan en MySQL: pesan mucho y Gemini solo los necesita en el turno en que se envían. El historial conserva el nombre para que la conversación tenga sentido.
+* Spotify y Smart Home son opcionales y se activan por configuración, para que Apache funcione igual que antes en un equipo sin ellos.
+
 ## 01/10/2026 — feature/imagenes-horario
 
 ### Objetivo
