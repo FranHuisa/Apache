@@ -1,6 +1,7 @@
 package com.apache.core
 
 import java.io.File
+
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -56,7 +57,6 @@ object CoreProcessManager {
 
     fun stop() {
         coreProcess?.let { process ->
-
             if (process.isAlive) {
                 process.destroy()
             }
@@ -66,9 +66,7 @@ object CoreProcessManager {
     }
 
     private fun isCoreRunning(): Boolean {
-
         return try {
-
             val connection = URL(CORE_HEALTH_URL)
                 .openConnection() as HttpURLConnection
 
@@ -77,13 +75,10 @@ object CoreProcessManager {
             connection.readTimeout = 500
 
             connection.responseCode
-
             connection.disconnect()
 
             true
-
         } catch (_: Exception) {
-
             false
         }
     }
@@ -105,7 +100,7 @@ object CoreProcessManager {
 
     private fun findCoreJar(): File? {
 
-        /*
+        /**
          * Cuando Apache está empaquetado, el Core se encuentra dentro
          * de los recursos del Desktop y no existe como archivo físico.
          *
@@ -139,7 +134,7 @@ object CoreProcessManager {
             return coreJar
         }
 
-        /*
+        /**
          * Durante el desarrollo mantenemos las ubicaciones físicas
          * como alternativa para poder ejecutar Apache directamente
          * desde Gradle.
@@ -189,8 +184,6 @@ object CoreProcessManager {
 
     private fun findJavaExecutable(): String {
 
-        val javaHome = System.getProperty("java.home")
-
         val executableName =
             if (
                 System.getProperty("os.name")
@@ -202,9 +195,92 @@ object CoreProcessManager {
                 "java"
             }
 
-        return File(
-            javaHome,
+        /*
+         * Primero intentamos utilizar JAVA_HOME.
+         *
+         * Esto permite utilizar la instalación de Java del sistema
+         * aunque Apache esté ejecutándose con el runtime reducido
+         * incluido por jpackage.
+         */
+        val javaHome = System.getenv("JAVA_HOME")
+
+        if (!javaHome.isNullOrBlank()) {
+
+            val javaExecutable = File(
+                javaHome,
+                "bin/$executableName"
+            )
+
+            if (javaExecutable.exists() && javaExecutable.isFile) {
+                return javaExecutable.absolutePath
+            }
+        }
+
+        /*
+         * Si JAVA_HOME no está disponible, buscamos Java mediante
+         * el PATH del sistema.
+         */
+        try {
+
+            val process = ProcessBuilder(
+                if (
+                    System.getProperty("os.name")
+                        .lowercase()
+                        .contains("win")
+                ) {
+                    "where.exe"
+                } else {
+                    "which"
+                },
+                executableName
+            )
+                .redirectErrorStream(true)
+                .start()
+
+            val result = process.inputStream
+                .bufferedReader()
+                .readLines()
+
+            process.waitFor()
+
+            val javaFromPath = result
+                .firstOrNull()
+                ?.trim()
+
+            if (
+                !javaFromPath.isNullOrBlank() &&
+                File(javaFromPath).exists()
+            ) {
+                return File(javaFromPath).absolutePath
+            }
+
+        } catch (_: Exception) {
+            // Continuamos con la búsqueda alternativa.
+        }
+
+        /*
+         * Como último recurso utilizamos el java.home de la JVM actual.
+         *
+         * Esto funciona durante el desarrollo cuando Apache se ejecuta
+         * directamente mediante Gradle con una instalación completa
+         * de Java.
+         */
+        val currentJavaHome = System.getProperty("java.home")
+
+        val currentJavaExecutable = File(
+            currentJavaHome,
             "bin/$executableName"
-        ).absolutePath
+        )
+
+        if (
+            currentJavaExecutable.exists() &&
+            currentJavaExecutable.isFile
+        ) {
+            return currentJavaExecutable.absolutePath
+        }
+
+        throw IllegalStateException(
+            "No se ha encontrado una instalación de Java válida para iniciar el Core de Apache."
+        )
     }
 }
