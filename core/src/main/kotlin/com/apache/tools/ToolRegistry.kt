@@ -32,7 +32,7 @@ class ToolRegistry(private val tools: List<Tool>) {
      * actualizado de funciones disponibles (no hay estado guardado en Gemini entre llamadas).
      */
     fun toGeminiFunctionDeclarations(): List<Map<String, Any?>> =
-            tools.map { tool ->
+            tools.filter { it.isAvailable }.map { tool ->
                 mapOf(
                         "name" to tool.name,
                         "description" to tool.description,

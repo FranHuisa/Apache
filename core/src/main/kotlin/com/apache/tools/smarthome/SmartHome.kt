@@ -51,6 +51,10 @@ class SmartHomeService {
     val configPath: String
         get() = configFile.absolutePath
 
+    /** true si existe ~/.apache/smarthome.json. */
+    val isConfigured: Boolean
+        get() = configFile.exists()
+
     fun loadConfig(): SmartHomeConfig? =
         if (!configFile.exists()) null else mapper.readValue<SmartHomeConfig>(configFile)
 
@@ -108,6 +112,10 @@ class SmartHomeTool(private val smartHome: SmartHomeService) : Tool {
             "Si no sabes qué dispositivos hay, usa primero action 'list'."
 
     override val riskLevel = RiskLevel.REVERSIBLE
+
+    // Sin smarthome.json no se le ofrece a Gemini (se comprueba en cada petición).
+    override val isAvailable: Boolean
+        get() = smartHome.isConfigured
 
     override val parametersSchema: Map<String, Any?> = mapOf(
         "type" to "object",

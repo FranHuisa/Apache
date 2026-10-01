@@ -54,6 +54,14 @@ interface Tool {
         get() = true
 
     /**
+     * Si es false, la tool no se le ofrece a Gemini (p. ej. Smart Home sin
+     * dispositivos configurados): así no ocupa sitio en cada petición ni
+     * Gemini intenta usar algo que no funcionaría.
+     */
+    val isAvailable: Boolean
+        get() = true
+
+    /**
      * Ejecuta la tool con los argumentos que ha decidido Gemini.
      * @param args argumentos ya parseados (nombre del parámetro -> valor)
      * @return texto plano que se le devuelve a Gemini como resultado de la función,

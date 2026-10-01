@@ -43,11 +43,39 @@ private const val MAX_IMAGES_PER_REPLY = 3
 
 private const val SYSTEM_INSTRUCTION =
     """
-Eres Apache, un asistente de IA personal instalado en el ordenador del usuario.
+Eres Apache, el asistente personal del usuario, instalado en su ordenador.
+Hablas como una persona de confianza que le ayuda en el día a día, no como un
+chatbot ni una enciclopedia. Responde siempre en español.
 
-Eres útil, directo y honesto. Cuando necesites realizar una acción sobre el
-sistema (abrir una app, consultar información, etc.), usa las herramientas
-disponibles en lugar de inventar la respuesta. Responde siempre en español.
+CÓMO RESPONDES (lo más importante):
+- La longitud de tu respuesta va acorde a la pregunta. Un saludo, una orden o
+  una pregunta corta se contestan en una frase. Solo te extiendes si el usuario
+  pide una explicación, un plan o algo que de verdad necesite detalle.
+- Ve directo al grano: primero la respuesta, sin introducciones ("¡Claro!",
+  "¡Excelente pregunta!", "Como asistente...") ni repetir lo que te han pedido.
+- Cuando hagas una acción, confírmala en pocas palabras ("Hecho.", "Abriendo
+  Discord.", "Te lo apunto para mañana a las 10."). No expliques cómo lo has
+  hecho ni qué herramienta has usado.
+- No termines con ofrecimientos de relleno ("¿Necesitas algo más?", "Si quieres
+  también puedo..."). Pregunta solo si de verdad te falta un dato.
+- Sin markdown: el chat muestra texto plano, así que nada de **negritas**, #
+  títulos ni tablas. Usa una lista con guiones solo si hay 3 o más elementos que
+  de verdad la necesiten.
+- Si te equivocas o el usuario te corrige, reconócelo en pocas palabras ("Perdona,
+  esas no eran.") y arréglalo. Nada de disculpas largas ni notas sobre ser una IA.
+- Tono cercano y natural, tuteando. Puedes tener algo de humor, sin pasarte.
+  Emojis, como mucho uno y solo si encaja.
+
+Ejemplos del tono que se espera:
+- Usuario: "hola" -> "¡Hola! ¿Qué necesitas?" (con su nombre si lo sabes)
+- Usuario: "¿qué hora es?" -> "Son las 18:42."
+- Usuario: "abre spotify" -> "Abriendo Spotify."
+- Usuario: "¿cuánto es 15% de 80?" -> "12."
+- Usuario: "¿mañana llueve?" -> "No, mañana sol y 24 °C."
+
+Cuando necesites realizar una acción sobre el sistema (abrir una app, consultar
+información, etc.), usa las herramientas disponibles en lugar de inventar la
+respuesta.
 
 Cuando el usuario solicite varias acciones, realiza todas las acciones necesarias
 y no te limites únicamente a la primera.
@@ -69,8 +97,6 @@ mismo en su ordenador.
 Para archivos del ordenador usa searchFiles o recentFiles para encontrar la ruta
 y después openFile; nunca inventes rutas.
 
-Para luces, enchufes y otros dispositivos de casa usa smartHome.
-
 Si te preguntan algo actual (noticias, resultados, precios, estrenos, horarios)
 o algo que no sepas con seguridad, búscalo con webSearch en vez de inventarlo.
 
@@ -89,6 +115,15 @@ razonables en vez de preguntar demasiado, y al final resume el horario en una
 lista breve.
 """
 
+/** Se añade a la instrucción cuando el usuario habla por voz: la respuesta se escucha, no se lee. */
+private const val VOICE_INSTRUCTION =
+    """
+El usuario te está hablando por voz y tu respuesta se va a leer en voz alta.
+Responde como en una conversación hablada: una o dos frases cortas, sin listas,
+sin símbolos, sin emojis y sin URLs. Si algo necesita más detalle, da lo esencial
+y ofrece verlo en la pantalla.
+"""
+
 private val CURRENT_TIME_FORMAT: DateTimeFormatter =
     DateTimeFormatter.ofPattern("EEEE d 'de' MMMM 'de' yyyy, HH:mm", Locale.forLanguageTag("es-ES"))
 
@@ -97,8 +132,9 @@ private val CURRENT_TIME_FORMAT: DateTimeFormatter =
  * para que Gemini sepa qué día es "hoy" o "mañana" al organizar horarios
  * sin tener que llamar antes a getCurrentTime.
  */
-private fun systemInstructionForNow(userMemory: String): String =
+private fun systemInstructionForNow(userMemory: String, fromVoice: Boolean): String =
     SYSTEM_INSTRUCTION +
+        (if (fromVoice) VOICE_INSTRUCTION else "") +
         "\nFecha y hora actual del usuario: ${LocalDateTime.now().format(CURRENT_TIME_FORMAT)} " +
         "(${LocalDate.now()})." +
         if (userMemory.isBlank()) {
@@ -159,7 +195,8 @@ class Agent(
     fun handleMessage(
         conversationId: Long?,
         userMessage: String,
-        attachments: List<GeminiAttachment> = emptyList()
+        attachments: List<GeminiAttachment> = emptyList(),
+        fromVoice: Boolean = false
     ): Pair<Long, AgentResult> {
 
         val convId = memoryService.getOrCreateConversation(
@@ -181,7 +218,7 @@ class Agent(
             storedMessage
         )
 
-        val result = runTurn(convId, mutableListOf(), attachments)
+        val result = runTurn(convId, mutableListOf(), attachments, fromVoice)
 
         return convId to result
     }
@@ -194,7 +231,8 @@ class Agent(
     private fun runTurn(
         conversationId: Long,
         images: MutableList<ChatImage>,
-        attachments: List<GeminiAttachment> = emptyList()
+        attachments: List<GeminiAttachment> = emptyList(),
+        fromVoice: Boolean = false
     ): AgentResult {
 
         val history = memoryService.getHistory(conversationId)
@@ -203,7 +241,7 @@ class Agent(
             val geminiResult =
                 geminiClient.sendMessage(
                     history,
-                    systemInstructionForNow(loadUserMemory()),
+                    systemInstructionForNow(loadUserMemory(), fromVoice),
                     attachments
                 )
         ) {
@@ -225,7 +263,8 @@ class Agent(
                     conversationId,
                     geminiResult.calls,
                     images,
-                    attachments
+                    attachments,
+                    fromVoice
                 )
             }
         }
@@ -235,7 +274,8 @@ class Agent(
         conversationId: Long,
         calls: List<GeminiResult.FunctionCall>,
         images: MutableList<ChatImage>,
-        attachments: List<GeminiAttachment>
+        attachments: List<GeminiAttachment>,
+        fromVoice: Boolean
     ): AgentResult {
 
         val outputs = mutableListOf<String>()
@@ -274,7 +314,7 @@ class Agent(
 
                     } else {
 
-                        return runTurn(conversationId, images, attachments)
+                        return runTurn(conversationId, images, attachments, fromVoice)
                     }
                 }
 
@@ -321,7 +361,7 @@ class Agent(
             return AgentResult.Reply(finalOutput, images.toList())
         }
 
-        return runTurn(conversationId, images, attachments)
+        return runTurn(conversationId, images, attachments, fromVoice)
     }
 
     /**

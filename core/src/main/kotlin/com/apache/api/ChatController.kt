@@ -29,7 +29,8 @@ class ChatController(private val agent: Agent) {
             agent.handleMessage(
                 request.conversationId,
                 request.message,
-                request.attachments.map { GeminiAttachment(it.name, it.mimeType, it.data) }
+                request.attachments.map { GeminiAttachment(it.name, it.mimeType, it.data) },
+                request.fromVoice
             )
 
         return toResponse(conversationId, result)

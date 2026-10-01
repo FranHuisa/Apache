@@ -43,11 +43,17 @@ fun confirmActionInCore(confirmationId: String, approved: Boolean): ChatResponse
 fun sendMessageToCore(
     conversationId: Long?,
     message: String,
-    attachments: List<ChatAttachment> = emptyList()
+    attachments: List<ChatAttachment> = emptyList(),
+    fromVoice: Boolean = false
 ): ChatResponse {
 
     val json = objectMapper.writeValueAsString(
-        ChatRequest(conversationId = conversationId, message = message, attachments = attachments)
+        ChatRequest(
+            conversationId = conversationId,
+            message = message,
+            attachments = attachments,
+            fromVoice = fromVoice
+        )
     )
 
     val request = Request.Builder()

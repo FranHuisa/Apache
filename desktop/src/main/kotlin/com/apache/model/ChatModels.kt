@@ -28,7 +28,9 @@ data class ConfirmRequest(val confirmationId: String, val approved: Boolean)
 data class ChatRequest(
     val conversationId: Long? = null,
     val message: String,
-    val attachments: List<ChatAttachment> = emptyList()
+    val attachments: List<ChatAttachment> = emptyList(),
+    // true si viene del micrófono: Apache responde más corto porque se lee en voz alta.
+    val fromVoice: Boolean = false
 )
 
 // DTO que recibimos del Core.

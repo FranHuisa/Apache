@@ -36,7 +36,7 @@ private const val DAILY_SUMMARY_PROMPT =
     "(Mensaje automático al abrir Apache por primera vez hoy, no lo menciones.) " +
         "Dame mi resumen de hoy: salúdame por mi nombre si lo sabes, dime qué tengo hoy en el " +
         "calendario y el horario, mis recordatorios y tareas pendientes, y el tiempo de hoy si " +
-        "sabes en qué ciudad estoy. Usa las herramientas que necesites. Sé breve: una lista corta " +
+        "sabes en qué ciudad estoy. Usa las herramientas que necesites. Muy breve: 2-4 líneas " +
         "y, si no tengo nada, dilo en una frase."
 
 class ChatController(private val scope: CoroutineScope) {
@@ -265,7 +265,8 @@ class ChatController(private val scope: CoroutineScope) {
 
         try {
             val response = withContext(Dispatchers.IO) {
-                sendMessageToCore(conversationId, text, turnAttachments)
+                // speak == true solo en los turnos de voz.
+                sendMessageToCore(conversationId, text, turnAttachments, fromVoice = speak)
             }
             val reply = response.reply ?: response.warning ?: "Apache no devolvió una respuesta."
 
