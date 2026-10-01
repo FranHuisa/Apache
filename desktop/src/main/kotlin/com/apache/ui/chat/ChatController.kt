@@ -160,8 +160,9 @@ class ChatController(private val scope: CoroutineScope) {
     suspend fun runTurn(
         text: String,
         speak: Boolean,
-        onReply: (suspend (String) -> Unit)? = null,
-        showUserMessage: Boolean = true
+        showUserMessage: Boolean = true,
+        // Debe ser el último parámetro: el modo voz lo pasa como lambda final.
+        onReply: (suspend (String) -> Unit)? = null
     ): String? {
         // Los mensajes automáticos (p. ej. el resumen del día) no se muestran como si
         // los hubiera escrito el usuario.
