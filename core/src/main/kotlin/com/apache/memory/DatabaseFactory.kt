@@ -82,24 +82,22 @@ class DatabaseFactory(
             }
 
             /*
-             * Memoria a largo plazo. La tabla forma parte del esquema inicial de
-             * Apache 0.1, pero se crea aquí si falta para que la sección Memoria
-             * funcione también en instalaciones donde no se llegó a crear.
-             * Es aditivo: si la tabla ya existe, no se toca.
+             * Memoria permanente de Apache (tabla propia `user_memory`). No se usa
+             * la tabla `memory` del esquema inicial porque en las instalaciones
+             * existentes tiene otras columnas. Es aditivo: si ya existe, no se toca.
              */
             exec(
                 """
-                CREATE TABLE IF NOT EXISTS memory (
+                CREATE TABLE IF NOT EXISTS user_memory (
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                     user_id BIGINT NOT NULL,
                     type VARCHAR(50) NOT NULL,
-                    `key` VARCHAR(255) NOT NULL,
-                    value TEXT NOT NULL,
+                    memory_key VARCHAR(255) NOT NULL,
+                    memory_value TEXT NOT NULL,
                     importance DOUBLE NOT NULL DEFAULT 0.5,
-                    confidence DOUBLE NOT NULL DEFAULT 1.0,
-                    expires_at DATETIME NULL,
                     created_at DATETIME NOT NULL,
-                    updated_at DATETIME NOT NULL
+                    updated_at DATETIME NOT NULL,
+                    INDEX idx_user_memory_user (user_id)
                 )
                 """.trimIndent()
             )

@@ -66,7 +66,7 @@ Con Apache ya funcional, añadir dos capacidades nuevas: que Apache pueda enseñ
   * Categorías: `personal`, `preferencia`, `rutina`, `trabajo`, `salud` y `otro`.
   * Tools `rememberFact` y `forgetFact` (REVERSIBLE). Apache guarda solo lo personal y duradero cuando se lo cuentas o cuando dices «recuerda que...».
   * En cada turno, el Agent añade a la instrucción de sistema lo que recuerda del usuario (los 60 datos más importantes). Si MySQL falla en ese paso, Apache sigue respondiendo sin esos datos.
-  * `DatabaseFactory` crea la tabla `memory` si falta (`CREATE TABLE IF NOT EXISTS`, aditivo).
+  * La memoria se guarda en una tabla propia, `user_memory` (columnas `memory_key` / `memory_value` para evitar las palabras reservadas de MySQL), que `DatabaseFactory` crea al arrancar si no existe. Primero se intentó usar la tabla `memory` del esquema inicial, pero en la base de datos real tiene otras columnas (`Unknown column 'memory.key'`), así que se dejó intacta.
   * Nueva API `/api/memory` (listar, crear, editar y borrar datos) y `/api/memory/conversations` (lista de conversaciones con título sacado del primer mensaje, y sus mensajes visibles, sin las llamadas internas a tools).
 * Desktop, sección **Memoria**:
   * Pestaña «Lo que sabe de ti»: datos agrupados por categoría, con formulario para añadir, editar u olvidar.

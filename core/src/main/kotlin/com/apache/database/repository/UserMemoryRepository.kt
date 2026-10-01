@@ -1,7 +1,6 @@
 package com.apache.database.repository
 
 import com.apache.database.tables.Conversations
-import com.apache.database.tables.Memory
 import com.apache.database.tables.Messages
 import java.time.LocalDateTime
 import org.jetbrains.exposed.sql.ResultRow
@@ -13,7 +12,30 @@ import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
+import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.sql.javatime.datetime
 import org.springframework.stereotype.Repository
+
+/**
+ * Tabla `user_memory`: memoria permanente de Apache.
+ *
+ * No se usa la tabla `memory` del esquema inicial porque en las instalaciones
+ * existentes tiene otras columnas. Esta tabla la crea DatabaseFactory al
+ * arrancar si no existe. Las columnas evitan las palabras reservadas de
+ * MySQL `key` y `value`.
+ */
+object UserMemories : Table("user_memory") {
+    val id = long("id").autoIncrement()
+    val userId = long("user_id")
+    val type = varchar("type", 50)
+    val key = varchar("memory_key", 255)
+    val value = text("memory_value")
+    val importance = double("importance")
+    val createdAt = datetime("created_at")
+    val updatedAt = datetime("updated_at")
+
+    override val primaryKey = PrimaryKey(id)
+}
 
 /** Un dato que Apache recuerda del usuario (tabla `memory`). */
 data class MemoryRecord(
@@ -53,54 +75,52 @@ data class ConversationMessage(
 class UserMemoryRepository {
 
     fun findAll(userId: Long): List<MemoryRecord> = transaction {
-        Memory
+        UserMemories
             .selectAll()
-            .where { Memory.userId eq userId }
-            .orderBy(Memory.importance to SortOrder.DESC, Memory.updatedAt to SortOrder.DESC)
-            .filter { row -> row[Memory.expiresAt]?.isAfter(LocalDateTime.now()) ?: true }
+            .where { UserMemories.userId eq userId }
+            .orderBy(UserMemories.importance to SortOrder.DESC, UserMemories.updatedAt to SortOrder.DESC)
             .map { it.toMemoryRecord() }
     }
 
     fun findById(memoryId: Long): MemoryRecord? = transaction {
-        Memory.selectAll().where { Memory.id eq memoryId }.firstOrNull()?.toMemoryRecord()
+        UserMemories.selectAll().where { UserMemories.id eq memoryId }.firstOrNull()?.toMemoryRecord()
     }
 
     /** Busca un dato por su clave, sin distinguir mayúsculas (para no duplicar "nombre" y "Nombre"). */
     fun findByKey(userId: Long, key: String): MemoryRecord? = transaction {
-        Memory
+        UserMemories
             .selectAll()
-            .where { Memory.userId eq userId }
-            .firstOrNull { it[Memory.key].equals(key, ignoreCase = true) }
+            .where { UserMemories.userId eq userId }
+            .firstOrNull { it[UserMemories.key].equals(key, ignoreCase = true) }
             ?.toMemoryRecord()
     }
 
     fun create(userId: Long, type: String, key: String, value: String, importance: Double): Long = transaction {
         val now = LocalDateTime.now()
 
-        Memory.insert {
-            it[Memory.userId] = userId
-            it[Memory.type] = type
-            it[Memory.key] = key
-            it[Memory.value] = value
-            it[Memory.importance] = importance
-            it[Memory.confidence] = 1.0
-            it[Memory.createdAt] = now
-            it[Memory.updatedAt] = now
-        } get Memory.id
+        UserMemories.insert {
+            it[UserMemories.userId] = userId
+            it[UserMemories.type] = type
+            it[UserMemories.key] = key
+            it[UserMemories.value] = value
+            it[UserMemories.importance] = importance
+            it[UserMemories.createdAt] = now
+            it[UserMemories.updatedAt] = now
+        } get UserMemories.id
     }
 
     fun update(memoryId: Long, type: String?, key: String?, value: String?, importance: Double?): Boolean = transaction {
-        Memory.update({ Memory.id eq memoryId }) {
-            if (type != null) it[Memory.type] = type
-            if (key != null) it[Memory.key] = key
-            if (value != null) it[Memory.value] = value
-            if (importance != null) it[Memory.importance] = importance
-            it[Memory.updatedAt] = LocalDateTime.now()
+        UserMemories.update({ UserMemories.id eq memoryId }) {
+            if (type != null) it[UserMemories.type] = type
+            if (key != null) it[UserMemories.key] = key
+            if (value != null) it[UserMemories.value] = value
+            if (importance != null) it[UserMemories.importance] = importance
+            it[UserMemories.updatedAt] = LocalDateTime.now()
         } > 0
     }
 
     fun delete(memoryId: Long): Boolean = transaction {
-        Memory.deleteWhere { Memory.id eq memoryId } > 0
+        UserMemories.deleteWhere { UserMemories.id eq memoryId } > 0
     }
 
     // --- Conversaciones (solo lectura) ---
@@ -157,12 +177,12 @@ class UserMemoryRepository {
     }
 
     private fun ResultRow.toMemoryRecord() = MemoryRecord(
-        id = this[Memory.id],
-        type = this[Memory.type],
-        key = this[Memory.key],
-        value = this[Memory.value],
-        importance = this[Memory.importance],
-        createdAt = this[Memory.createdAt],
-        updatedAt = this[Memory.updatedAt]
+        id = this[UserMemories.id],
+        type = this[UserMemories.type],
+        key = this[UserMemories.key],
+        value = this[UserMemories.value],
+        importance = this[UserMemories.importance],
+        createdAt = this[UserMemories.createdAt],
+        updatedAt = this[UserMemories.updatedAt]
     )
 }
