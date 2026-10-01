@@ -2,9 +2,9 @@ import org.gradle.jvm.tasks.Jar
 
 plugins {
 
-    kotlin("jvm") version "1.9.24"
+    kotlin("jvm")
 
-    id("org.jetbrains.compose") version "1.6.11"
+    id("org.jetbrains.compose")
 
 }
 
