@@ -23,6 +23,13 @@ import kotlinx.coroutines.withContext
  * el mismo historial y el mismo `conversationId` (antes esto estaba duplicado
  * entre `processMessage` y `runVoiceTurn`).
  */
+private const val DAILY_SUMMARY_PROMPT =
+    "(Mensaje automático al abrir Apache por primera vez hoy, no lo menciones.) " +
+        "Dame mi resumen de hoy: salúdame por mi nombre si lo sabes, dime qué tengo hoy en el " +
+        "calendario y el horario, mis recordatorios y tareas pendientes, y el tiempo de hoy si " +
+        "sabes en qué ciudad estoy. Usa las herramientas que necesites. Sé breve: una lista corta " +
+        "y, si no tengo nada, dilo en una frase."
+
 class ChatController(private val scope: CoroutineScope) {
 
     var messages by mutableStateOf(
@@ -111,6 +118,20 @@ class ChatController(private val scope: CoroutineScope) {
         }
     }
 
+    /**
+     * Resumen del día: la primera vez que se abre Apache cada día, le pide a
+     * Apache un resumen (horario, recordatorios, tareas y tiempo). La petición
+     * no se muestra en el chat, solo la respuesta.
+     */
+    suspend fun showDailySummaryIfNeeded() {
+        if (!SessionStore.shouldShowDailySummary() || isLoading) return
+
+        val reply = runTurn(DAILY_SUMMARY_PROMPT, speak = false, showUserMessage = false)
+
+        // Si el Core no respondía, se volverá a intentar en el próximo arranque.
+        if (reply != null) SessionStore.markDailySummaryShown()
+    }
+
     /** Añade un mensaje "de Apache" sin pasar por el Core (avisos del modo escucha, errores locales...). */
     fun appendSystemMessage(text: String) {
         appendMessage(ChatMessage(text, false))
@@ -139,9 +160,12 @@ class ChatController(private val scope: CoroutineScope) {
     suspend fun runTurn(
         text: String,
         speak: Boolean,
-        onReply: (suspend (String) -> Unit)? = null
+        onReply: (suspend (String) -> Unit)? = null,
+        showUserMessage: Boolean = true
     ): String? {
-        appendMessage(ChatMessage(text, true))
+        // Los mensajes automáticos (p. ej. el resumen del día) no se muestran como si
+        // los hubiera escrito el usuario.
+        if (showUserMessage) appendMessage(ChatMessage(text, true))
         isLoading = true
         showThinking = false
 

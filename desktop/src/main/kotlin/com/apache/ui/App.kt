@@ -73,6 +73,9 @@ fun App() {
 
     LaunchedEffect(Unit) { notificationsController.startPolling() }
 
+    // Resumen del día (solo la primera vez que se abre Apache cada día).
+    LaunchedEffect(Unit) { chatController.showDailySummaryIfNeeded() }
+
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = ApacheColors.background) {
             Box(modifier = Modifier.fillMaxSize()) {
