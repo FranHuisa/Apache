@@ -1,6 +1,8 @@
 package com.apache.tools
 
 import com.apache.tools.music.MusicSourceManager
+import com.apache.tools.music.SpotifyClient
+import com.apache.tools.music.SpotifyPlayResult
 import com.apache.tools.music.YouTubeSongSearch
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -21,7 +23,8 @@ import org.springframework.stereotype.Component
  */
 @Component
 class PlaySongTool(
-    private val sourceManager: MusicSourceManager
+    private val sourceManager: MusicSourceManager,
+    private val spotify: SpotifyClient
 ) : Tool {
 
     override val name = "playSong"
@@ -48,8 +51,8 @@ class PlaySongTool(
             "platform" to mapOf(
                 "type" to "string",
                 "description" to
-                    "Dónde ponerla. 'youtube' por defecto. 'spotify' solo si el usuario lo pide " +
-                        "expresamente (en Spotify solo se puede abrir la búsqueda).",
+                    "Dónde ponerla. Si no se indica, se usa Spotify cuando está conectado y, si no, " +
+                        "YouTube. Indícalo solo si el usuario lo pide expresamente.",
                 "enum" to listOf("youtube", "spotify")
             )
         ),
@@ -62,9 +65,22 @@ class PlaySongTool(
             return "¿Qué canción quieres que ponga?"
         }
 
-        val platform = (args["platform"] as? String)?.trim()?.lowercase() ?: "youtube"
+        val platform = (args["platform"] as? String)?.trim()?.lowercase()
+            ?: if (spotify.isConnected) "spotify" else "youtube"
 
-        return if (platform == "spotify") openInSpotify(query) else playOnYouTube(query)
+        if (platform != "spotify") return playOnYouTube(query)
+
+        // Spotify con la API conectada: pone la canción directamente.
+        if (spotify.isConnected) {
+            return when (val result = spotify.play(query)) {
+                is SpotifyPlayResult.Playing ->
+                    "Poniendo «${result.track.name}» de ${result.track.artists} en Spotify."
+                is SpotifyPlayResult.Failed ->
+                    result.reason + " ¿Quieres que la ponga en YouTube?"
+            }
+        }
+
+        return openInSpotify(query)
     }
 
     private fun playOnYouTube(query: String): String {
@@ -98,8 +114,8 @@ class PlaySongTool(
         val encoded = URLEncoder.encode(query, StandardCharsets.UTF_8).replace("+", "%20")
 
         return if (openUrl("spotify:search:$encoded")) {
-            "He abierto la búsqueda de «$query» en Spotify. Spotify no deja que Apache elija la " +
-                "canción sin conectar su API, así que dale tú a reproducir."
+            "He abierto la búsqueda de «$query» en Spotify; dale tú a reproducir. Si conectas tu " +
+                "cuenta («conecta mi Spotify»), la pondré yo directamente."
         } else {
             "No he podido abrir Spotify. ¿Está instalado? Si quieres, la pongo en YouTube."
         }

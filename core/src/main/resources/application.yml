@@ -14,6 +14,12 @@ apache:
       tts-voice-name: Kore
       tts-sample-rate: 24000
 
+  spotify:
+    # Opcional. Client ID de una app de developer.spotify.com (Redirect URI:
+    # http://127.0.0.1:8080/api/spotify/callback). Vacío = Spotify por API desactivado.
+    client-id: ${SPOTIFY_CLIENT_ID:}
+    redirect-uri: http://127.0.0.1:8080/api/spotify/callback
+
   db:
     # Apache 0.1 utiliza MySQL como base de datos principal.
     url: jdbc:mysql://localhost:3306/apache
