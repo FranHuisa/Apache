@@ -261,7 +261,7 @@ class GeminiClient(
                                 )
                                 .build()
 
-                http.newCall(request).execute().use { response ->
+                executeWithRetry(request).use { response ->
                         if (!response.isSuccessful) {
                                 throw IllegalStateException(
                                         "Error llamando a Gemini: ${response.code} ${response.body?.string()}"
@@ -310,6 +310,27 @@ class GeminiClient(
                                 else -> GeminiResult.TextResponse("")
                         }
                 }
+        }
+
+        /**
+         * Ejecuta la petición a Gemini reintentando cuando Google está saturado
+         * (503 "high demand") o limita peticiones (429), que suelen ser errores
+         * pasajeros de unos segundos. Espera 1 s, 3 s y 6 s entre intentos.
+         * Cualquier otra respuesta (correcta o error real) se devuelve tal cual.
+         */
+        private fun executeWithRetry(request: Request): okhttp3.Response {
+                val waits = listOf(1_000L, 3_000L, 6_000L)
+
+                for (wait in waits) {
+                        val response = http.newCall(request).execute()
+                        if (response.code != 503 && response.code != 429) return response
+
+                        println("Gemini ocupado (${response.code}), reintentando en ${wait / 1000} s...")
+                        response.close()
+                        Thread.sleep(wait)
+                }
+
+                return http.newCall(request).execute()
         }
 
         /**

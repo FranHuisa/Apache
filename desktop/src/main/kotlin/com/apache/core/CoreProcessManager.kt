@@ -38,6 +38,9 @@ object CoreProcessManager {
 
         coreProcess = ProcessBuilder(
             javaExecutable,
+            // Salida en UTF-8 para que core.log no rompa las tildes (Windows usa cp1252 por defecto).
+            "-Dstdout.encoding=UTF-8",
+            "-Dstderr.encoding=UTF-8",
             "-jar",
             coreJar.absolutePath
         )
