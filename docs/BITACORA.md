@@ -46,6 +46,17 @@ Con Apache ya funcional, añadir dos capacidades nuevas: que Apache pueda enseñ
 * `ChatController.runTurn` ahora devuelve el texto de la respuesta (o `null` si falla), para poder mostrarlo en Horario.
 * Ayuda actualizada con ejemplos de imágenes y de horario.
 
+### Poner una canción concreta
+
+* Nueva tool `playSong` (REVERSIBLE, responde sin volver a Gemini):
+  * **YouTube** (por defecto): `YouTubeSongSearch` lee la página de resultados de YouTube (sin API key), coge el primer vídeo y lo abre en el navegador con `autoplay=1`. Si no consigue leer el resultado, abre la búsqueda para que el usuario elija.
+  * **Spotify** (solo si se pide): abre `spotify:search:...` en la app. Spotify no deja reproducir una canción concreta sin su API con OAuth, así que el usuario tiene que darle a reproducir.
+  * Antes de abrir la canción pausa lo que esté sonando (Windows Media Session), para que no suenen dos cosas a la vez.
+  * Las URLs se abren con `rundll32 url.dll,FileProtocolHandler` porque Spring Boot arranca en modo headless (no sirve `java.awt.Desktop`) y así se evita que `cmd` corte la URL en los `&`.
+* Al abrirse en el navegador, la canción aparece como sesión multimedia de Windows, así que `musicControl` (pausa, siguiente, volumen) sigue funcionando sobre ella.
+* Instrucción de sistema: `playSong` para poner algo concreto, `musicControl` para controlar lo que ya suena.
+* Ayuda actualizada con ejemplos («Pon Bohemian Rhapsody de Queen», «Busca la canción Despacito»).
+
 ### Problemas encontrados
 
 * En el entorno de esta sesión no hay acceso a Maven Central ni a los repositorios de Compose, así que no se ha podido ejecutar Gradle. El código del Core tocado se compiló con `kotlinc` 1.9.24 contra stubs de Spring/OkHttp/Jackson (sin errores) y se probaron aparte la lectura de líneas `IMAGE|` y el reparto de bloques solapados. El Desktop (Compose) se ha revisado a mano: **hay que compilarlo y probarlo en local**.
@@ -61,10 +72,12 @@ Con Apache ya funcional, añadir dos capacidades nuevas: que Apache pueda enseñ
 * [x] Crear / editar / completar / eliminar bloques desde Horario
 * [x] Organizar el día con Apache desde Horario
 * [x] Horario en ventana aparte
+* [x] Tool `playSong` (YouTube; Spotify solo abre la búsqueda)
 * [ ] Compilar y probar en local (`gradlew :desktop:run`)
 * [ ] Guardar las imágenes en el historial para mostrarlas al recargar una conversación
 * [ ] Arrastrar bloques para moverlos o cambiar su duración
 * [ ] Que el usuario pueda adjuntar imágenes en el chat (Gemini acepta imágenes como entrada)
+* [ ] Integrar la API de Spotify (OAuth) para poner canciones concretas también en Spotify
 
 ### Decisiones de diseño
 

@@ -23,6 +23,9 @@ private val helpSections = listOf(
         "Música",
         listOf(
             "«Pon música»",
+            "«Pon Bohemian Rhapsody de Queen»",
+            "«Busca la canción Despacito»",
+            "«Pon Shakira en Spotify»",
             "«Pausa la música»",
             "«Sube el volumen»",
             "«¿Qué está sonando?»",
@@ -84,7 +87,7 @@ fun AyudaScreen() {
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = "• Aplicaciones: abrir, cerrar o comprobar si una aplicación está abierta.\n" +
-                "• Música: reproducir, pausar, cambiar de pista, consultar lo que suena y ajustar el volumen.\n" +
+                "• Música: poner una canción concreta (YouTube), reproducir, pausar, cambiar de pista, consultar lo que suena y ajustar el volumen.\n" +
                 "• Tiempo: consultar el tiempo actual y la previsión.\n" +
                 "• Sistema: ver recursos e información del ordenador.\n" +
                 "• Fecha y hora: consultar la hora actual.\n" +
