@@ -15,5 +15,14 @@ data class ChatResponse(
     val reply: String? = null,
     val needsConfirmation: Boolean = false,
     val confirmationId: String? = null,
-    val warning: String? = null
+    val warning: String? = null,
+    /** Imágenes (0-3) que el Desktop dibuja debajo de la respuesta. */
+    val images: List<ChatImageDto> = emptyList()
+)
+
+/** Imagen que acompaña a una respuesta de Apache. */
+data class ChatImageDto(
+    val url: String,
+    val title: String = "",
+    val sourceUrl: String? = null
 )

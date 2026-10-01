@@ -16,8 +16,14 @@ import org.springframework.stereotype.Component
  */
 sealed class AgentResult {
 
-    /** Respuesta final en texto, lista para mostrar. */
-    data class Reply(val text: String) : AgentResult()
+    /**
+     * Respuesta final en texto, lista para mostrar, con las imágenes (0-3)
+     * que alguna tool haya encontrado durante el turno.
+     */
+    data class Reply(
+        val text: String,
+        val images: List<ChatImage> = emptyList()
+    ) : AgentResult()
 
     /** Hay una acción de riesgo esperando confirmación explícita del usuario. */
     data class NeedsConfirmation(
@@ -25,6 +31,9 @@ sealed class AgentResult {
         val warning: String
     ) : AgentResult()
 }
+
+/** Máximo de imágenes que Apache muestra en una misma respuesta. */
+private const val MAX_IMAGES_PER_REPLY = 3
 
 private const val SYSTEM_INSTRUCTION =
     """
@@ -36,6 +45,12 @@ disponibles en lugar de inventar la respuesta. Responde siempre en español.
 
 Cuando el usuario solicite varias acciones, realiza todas las acciones necesarias
 y no te limites únicamente a la primera.
+
+Puedes enseñar imágenes en el chat con la herramienta searchImages. Úsala cuando
+el usuario quiera ver algo o cuando una imagen ayude de verdad a la respuesta.
+Muestra 1 imagen para una cosa concreta y 2 o 3 cuando pida varias, una
+comparación o variedad; nunca más de 3. Las imágenes aparecen solas debajo de tu
+mensaje: no escribas sus enlaces en el texto.
 """
 
 /**
@@ -89,7 +104,7 @@ class Agent(
             userMessage
         )
 
-        val result = runTurn(convId)
+        val result = runTurn(convId, mutableListOf())
 
         return convId to result
     }
@@ -99,7 +114,10 @@ class Agent(
      * memoria. Es una función separada de handleMessage porque se vuelve a invocar
      * recursivamente tras ejecutar una tool y también tras confirmar una acción pendiente.
      */
-    private fun runTurn(conversationId: Long): AgentResult {
+    private fun runTurn(
+        conversationId: Long,
+        images: MutableList<ChatImage>
+    ): AgentResult {
 
         val history = memoryService.getHistory(conversationId)
 
@@ -119,14 +137,15 @@ class Agent(
                     geminiResult.text
                 )
 
-                AgentResult.Reply(geminiResult.text)
+                AgentResult.Reply(geminiResult.text, images.toList())
             }
 
             is GeminiResult.FunctionCalls -> {
 
                 handleFunctionCalls(
                     conversationId,
-                    geminiResult.calls
+                    geminiResult.calls,
+                    images
                 )
             }
         }
@@ -134,7 +153,8 @@ class Agent(
 
     private fun handleFunctionCalls(
         conversationId: Long,
-        calls: List<GeminiResult.FunctionCall>
+        calls: List<GeminiResult.FunctionCall>,
+        images: MutableList<ChatImage>
     ): AgentResult {
 
         val outputs = mutableListOf<String>()
@@ -159,6 +179,8 @@ class Agent(
 
                     val output = tool.execute(call.args)
 
+                    collectImages(output, images)
+
                     memoryService.appendMessage(
                         conversationId,
                         "function",
@@ -171,7 +193,7 @@ class Agent(
 
                     } else {
 
-                        return runTurn(conversationId)
+                        return runTurn(conversationId, images)
                     }
                 }
 
@@ -214,10 +236,23 @@ class Agent(
                 finalOutput
             )
 
-            return AgentResult.Reply(finalOutput)
+            return AgentResult.Reply(finalOutput, images.toList())
         }
 
-        return runTurn(conversationId)
+        return runTurn(conversationId, images)
+    }
+
+    /**
+     * Añade a [images] las imágenes que la tool haya devuelto en su resultado
+     * (líneas `IMAGE|...`, ver [ChatImage]), sin repetir y con un máximo de 3
+     * por respuesta.
+     */
+    private fun collectImages(output: String, images: MutableList<ChatImage>) {
+        ChatImage.parseFromToolOutput(output).forEach { image ->
+            if (images.size < MAX_IMAGES_PER_REPLY && images.none { it.url == image.url }) {
+                images.add(image)
+            }
+        }
     }
 
     /**
@@ -243,7 +278,7 @@ class Agent(
                 "${pending.toolName}\nEl usuario canceló la acción."
             )
 
-            return runTurn(pending.conversationId)
+            return runTurn(pending.conversationId, mutableListOf())
         }
 
         val tool =
@@ -254,12 +289,15 @@ class Agent(
 
         val output = tool.execute(pending.args)
 
+        val images = mutableListOf<ChatImage>()
+        collectImages(output, images)
+
         memoryService.appendMessage(
             pending.conversationId,
             "function",
             "${tool.name}\n$output"
         )
 
-        return runTurn(pending.conversationId)
+        return runTurn(pending.conversationId, images)
     }
 }
