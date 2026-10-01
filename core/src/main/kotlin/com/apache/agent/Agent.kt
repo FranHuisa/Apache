@@ -1,5 +1,6 @@
 package com.apache.agent
 
+import com.apache.ai.GeminiAttachment
 import com.apache.ai.GeminiClient
 import com.apache.ai.GeminiResult
 import com.apache.database.service.UserMemoryService
@@ -60,6 +61,10 @@ mensaje: no escribas sus enlaces en el texto.
 Si el usuario pide poner, buscar o reproducir una canción, artista o álbum
 concreto, usa playSong (en YouTube salvo que pida Spotify). Para pausar, pasar
 de canción o cambiar el volumen de lo que ya suena, usa musicControl.
+
+Si el usuario adjunta imágenes, capturas de pantalla o archivos, analízalos y
+responde sobre ellos. Una captura de pantalla es lo que el usuario tiene ahora
+mismo en su ordenador.
 
 Si te preguntan algo actual (noticias, resultados, precios, estrenos, horarios)
 o algo que no sepas con seguridad, búscalo con webSearch en vez de inventarlo.
@@ -148,7 +153,8 @@ class Agent(
 
     fun handleMessage(
         conversationId: Long?,
-        userMessage: String
+        userMessage: String,
+        attachments: List<GeminiAttachment> = emptyList()
     ): Pair<Long, AgentResult> {
 
         val convId = memoryService.getOrCreateConversation(
@@ -156,13 +162,21 @@ class Agent(
             conversationId = conversationId
         )
 
+        // Los adjuntos no se guardan en MySQL; en el historial solo queda su nombre.
+        val storedMessage = buildString {
+            append(userMessage.ifBlank { "(sin texto)" })
+            if (attachments.isNotEmpty()) {
+                append("\n[Adjuntos: ${attachments.joinToString { it.name }}]")
+            }
+        }
+
         memoryService.appendMessage(
             convId,
             "user",
-            userMessage
+            storedMessage
         )
 
-        val result = runTurn(convId, mutableListOf())
+        val result = runTurn(convId, mutableListOf(), attachments)
 
         return convId to result
     }
@@ -174,7 +188,8 @@ class Agent(
      */
     private fun runTurn(
         conversationId: Long,
-        images: MutableList<ChatImage>
+        images: MutableList<ChatImage>,
+        attachments: List<GeminiAttachment> = emptyList()
     ): AgentResult {
 
         val history = memoryService.getHistory(conversationId)
@@ -183,7 +198,8 @@ class Agent(
             val geminiResult =
                 geminiClient.sendMessage(
                     history,
-                    systemInstructionForNow(loadUserMemory())
+                    systemInstructionForNow(loadUserMemory()),
+                    attachments
                 )
         ) {
 
@@ -203,7 +219,8 @@ class Agent(
                 handleFunctionCalls(
                     conversationId,
                     geminiResult.calls,
-                    images
+                    images,
+                    attachments
                 )
             }
         }
@@ -212,7 +229,8 @@ class Agent(
     private fun handleFunctionCalls(
         conversationId: Long,
         calls: List<GeminiResult.FunctionCall>,
-        images: MutableList<ChatImage>
+        images: MutableList<ChatImage>,
+        attachments: List<GeminiAttachment>
     ): AgentResult {
 
         val outputs = mutableListOf<String>()
@@ -251,7 +269,7 @@ class Agent(
 
                     } else {
 
-                        return runTurn(conversationId, images)
+                        return runTurn(conversationId, images, attachments)
                     }
                 }
 
@@ -298,7 +316,7 @@ class Agent(
             return AgentResult.Reply(finalOutput, images.toList())
         }
 
-        return runTurn(conversationId, images)
+        return runTurn(conversationId, images, attachments)
     }
 
     /**

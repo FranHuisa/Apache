@@ -41,7 +41,8 @@ class GeminiClient(
         private val toolRegistry: ToolRegistry
 ) {
 
-        private val http = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(30)).build()
+        // 60 s: con imágenes o PDFs adjuntos Gemini tarda más en responder.
+        private val http = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(60)).build()
 
         private val mapper = ObjectMapper()
 
@@ -56,18 +57,42 @@ class GeminiClient(
          * @param history turnos previos de la conversación (para dar contexto)
          * @param systemInstruction instrucción de sistema (personalidad, reglas de Apache)
          */
-        fun sendMessage(history: List<GeminiTurn>, systemInstruction: String): GeminiResult {
+        fun sendMessage(
+                history: List<GeminiTurn>,
+                systemInstruction: String,
+                attachments: List<GeminiAttachment> = emptyList()
+        ): GeminiResult {
 
                 val contents = mutableListOf<Map<String, Any?>>()
 
-                history.forEach { turn ->
+                // Los adjuntos pertenecen al último mensaje del usuario de este turno.
+                val lastUserIndex = history.indexOfLast { it.role == "user" }
+
+                history.forEachIndexed { index, turn ->
                         when (turn.role) {
                                 "user" -> {
+                                        val parts = mutableListOf<Map<String, Any?>>(
+                                                mapOf("text" to turn.text)
+                                        )
+
+                                        if (index == lastUserIndex) {
+                                                attachments.forEach { attachment ->
+                                                        parts.add(
+                                                                mapOf(
+                                                                        "inline_data" to
+                                                                                mapOf(
+                                                                                        "mime_type" to attachment.mimeType,
+                                                                                        "data" to attachment.data
+                                                                                )
+                                                                )
+                                                        )
+                                                }
+                                        }
+
                                         contents.add(
                                                 mapOf(
                                                         "role" to "user",
-                                                        "parts" to
-                                                                listOf(mapOf("text" to turn.text))
+                                                        "parts" to parts
                                                 )
                                         )
                                 }

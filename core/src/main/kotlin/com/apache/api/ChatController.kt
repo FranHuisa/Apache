@@ -2,6 +2,7 @@ package com.apache.api
 
 import com.apache.agent.Agent
 import com.apache.agent.AgentResult
+import com.apache.ai.GeminiAttachment
 import com.apache.api.dto.ChatRequest
 import com.apache.api.dto.ChatImageDto
 import com.apache.api.dto.ChatResponse
@@ -27,7 +28,8 @@ class ChatController(private val agent: Agent) {
         val (conversationId, result) =
             agent.handleMessage(
                 request.conversationId,
-                request.message
+                request.message,
+                request.attachments.map { GeminiAttachment(it.name, it.mimeType, it.data) }
             )
 
         return toResponse(conversationId, result)

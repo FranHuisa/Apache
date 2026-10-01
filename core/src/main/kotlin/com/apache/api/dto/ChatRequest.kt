@@ -8,5 +8,14 @@ package com.apache.api.dto
  */
 data class ChatRequest(
     val conversationId: Long? = null,
-    val message: String
+    val message: String,
+    /** Imágenes, capturas o archivos adjuntos al mensaje (opcional). */
+    val attachments: List<ChatAttachmentDto> = emptyList()
+)
+
+/** Archivo adjunto a un mensaje: nombre, tipo MIME y contenido en Base64. */
+data class ChatAttachmentDto(
+    val name: String,
+    val mimeType: String,
+    val data: String
 )
