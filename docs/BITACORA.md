@@ -47,6 +47,15 @@ Con imágenes, horario, música y memoria ya funcionando y fusionados en `main`,
   * Descarta las imágenes enseñadas recientemente.
   * **Gemini verifica visualmente** las 8 mejores con el nuevo parámetro `description` («un gato completamente negro»), y solo se muestran las que pasan. Si ninguna vale, Apache lo dice en vez de enseñar algo incorrecto.
 
+* **Timeout con Gemini lento**: OkHttp corta por defecto a los 10 s sin recibir datos (`readTimeout`), y no bastaba con el `callTimeout` de 60 s. Ahora:
+  * `readTimeout` de 45 s y un reintento si se agota.
+  * `ChatController` devuelve un mensaje claro («Gemini está tardando / saturado») en vez de un HTTP 500.
+  * El Desktop espera hasta 240 s.
+* **Guardar imágenes solo bajo petición**: las imágenes del chat no se guardan en ningún sitio por defecto.
+  * Clic en una imagen → `POST /api/images/save` → `Imágenes/Apache` (versión de 1600 px si viene de Wikimedia).
+  * Por comando: tool `saveImage` («guarda la 2», «coge la tercera», «guárdalas todas») sobre las imágenes de la última respuesta (`ShownImagesStore`).
+  * Cada imagen lleva su número (1-3), y «Origen ↗» abre la página de origen.
+
 ### Problemas encontrados
 
 * Sigue sin haber acceso a Maven/Gradle en el entorno de desarrollo remoto. Se compiló con `kotlinc` contra stubs todo lo que no depende de Exposed ni de Compose, y se probaron la detección de «¿qué hay en mi pantalla?», la lectura de adjuntos y la búsqueda de archivos (incluida la búsqueda sin tildes). El código de Compose y la nueva dependencia MQTT hay que comprobarlos al compilar en local.

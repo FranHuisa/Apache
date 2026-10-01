@@ -12,6 +12,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import com.apache.network.saveImageInCore
+import kotlinx.coroutines.launch
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -49,8 +57,16 @@ fun ChatImages(images: List<ChatImage>) {
     val (width, height) = if (visible.size == 1) 380.dp to 260.dp else 230.dp to 170.dp
 
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        visible.forEach { image -> ChatImageCard(image, width, height) }
+        visible.forEachIndexed { index, image -> ChatImageCard(image, index + 1, width, height) }
     }
+}
+
+/** Estado del guardado de una imagen (solo se guarda si el usuario hace clic). */
+private sealed class SaveState {
+    object Idle : SaveState()
+    object Saving : SaveState()
+    data class Saved(val path: String) : SaveState()
+    data class Failed(val message: String) : SaveState()
 }
 
 /** Estado de carga de una imagen del chat. */
@@ -61,7 +77,23 @@ private sealed class ImageLoadState {
 }
 
 @Composable
-private fun ChatImageCard(image: ChatImage, width: Dp, height: Dp) {
+private fun ChatImageCard(image: ChatImage, position: Int, width: Dp, height: Dp) {
+
+    val scope = rememberCoroutineScope()
+    var saveState by remember(image.url) { mutableStateOf<SaveState>(SaveState.Idle) }
+
+    // Clic en la imagen = guardarla en Imágenes/Apache (las imágenes no se guardan solas).
+    fun save() {
+        if (saveState is SaveState.Saving || saveState is SaveState.Saved) return
+        saveState = SaveState.Saving
+        scope.launch {
+            saveState = try {
+                SaveState.Saved(withContext(Dispatchers.IO) { saveImageInCore(image) })
+            } catch (e: Exception) {
+                SaveState.Failed(e.message ?: "No se ha podido guardar")
+            }
+        }
+    }
 
     val state by produceState<ImageLoadState>(ImageLoadState.Loading, image.url) {
         value = try {
@@ -77,7 +109,7 @@ private fun ChatImageCard(image: ChatImage, width: Dp, height: Dp) {
                 .size(width, height)
                 .clip(RoundedCornerShape(12.dp))
                 .background(ApacheColors.botBubble)
-                .clickable { openInBrowser(image.sourceUrl ?: image.url) },
+                .clickable { save() },
             contentAlignment = Alignment.Center
         ) {
             when (val current = state) {
@@ -100,6 +132,46 @@ private fun ChatImageCard(image: ChatImage, width: Dp, height: Dp) {
                         modifier = Modifier.padding(12.dp)
                     )
             }
+
+            // Número de la imagen, para poder decir "guarda la 2".
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .size(22.dp)
+                    .background(Color(0xAA000000), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = position.toString(), color = Color.White, fontSize = 12.sp)
+            }
+        }
+
+        // Estado del guardado / pista.
+        val (statusText, statusColor) = when (val current = saveState) {
+            is SaveState.Idle -> "Clic para guardar" to ApacheColors.textFaint
+            is SaveState.Saving -> "Guardando..." to ApacheColors.textMuted
+            is SaveState.Saved -> "✓ Guardada en Imágenes/Apache" to ApacheColors.accentLight
+            is SaveState.Failed -> current.message to ApacheColors.dangerSoft
+        }
+
+        Row(
+            modifier = Modifier.width(width).padding(top = 4.dp, start = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = statusText,
+                color = statusColor,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = "Origen ↗",
+                color = ApacheColors.accentLight,
+                fontSize = 11.sp,
+                modifier = Modifier.clickable { openInBrowser(image.sourceUrl ?: image.url) }
+            )
         }
 
         if (image.title.isNotBlank()) {
@@ -109,7 +181,7 @@ private fun ChatImageCard(image: ChatImage, width: Dp, height: Dp) {
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 4.dp, start = 2.dp)
+                modifier = Modifier.padding(top = 2.dp, start = 2.dp)
             )
         }
     }

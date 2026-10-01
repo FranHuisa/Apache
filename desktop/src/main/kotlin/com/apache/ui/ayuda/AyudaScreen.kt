@@ -72,7 +72,8 @@ private val helpSections = listOf(
         listOf(
             "«Enséñame un ajolote»",
             "«¿Cómo es la Sagrada Familia?»",
-            "«Muéstrame tres razas de perro pequeñas»"
+            "«Muéstrame tres razas de perro pequeñas»",
+            "Las imágenes no se guardan solas: haz clic en una o di «guarda la 2» / «guárdalas todas»"
         )
     ),
     HelpSection(
