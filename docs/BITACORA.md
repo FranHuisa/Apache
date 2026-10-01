@@ -34,6 +34,19 @@ Con imágenes, horario, música y memoria ya funcionando y fusionados en `main`,
 * **Timeouts**: el cliente HTTP del Desktop tenía el `readTimeout` por defecto de OkHttp (10 s), y los turnos largos (varias tools, búsqueda, adjuntos) se daban por fallidos aunque el Core los terminara. Ahora es de 150 s; la llamada a Gemini en el Core pasa de 30 s a 60 s.
 * Instrucción de sistema, Ayuda (con pasos para Spotify y la casa) y `ROADMAP.MD` actualizados.
 
+### Ajustes tras probarlo (madrugada del 02/10)
+
+* **Caché de compilación corrupta** (`.class` de 0 bytes): el plugin de Kotlin se cargaba dos veces (versión en cada módulo) y quedaban daemons de Kotlin colgados. Ahora las versiones de los plugins se declaran una sola vez en el `build.gradle.kts` raíz con `apply false`, y `gradle.properties` compila Kotlin en el propio proceso de Gradle (`kotlin.compiler.execution.strategy=in-process`).
+* **Gemini saturado** (503 "high demand"): `GeminiClient` reintenta 3 veces (1 s, 3 s y 6 s) ante 503 y 429.
+* `core.log` en UTF-8 (`-Dstdout.encoding=UTF-8`).
+* **Respuestas demasiado largas**: nueva sección de estilo en la instrucción de sistema, con ejemplos. Longitud acorde a la pregunta, sin introducciones ni ofrecimientos de relleno («¿Necesitas algo más?»), sin markdown (el chat es texto plano) y disculpas breves cuando se equivoca.
+* **Modo voz**: `ChatRequest.fromVoice`. En los turnos por voz Apache responde en 1-2 frases, sin listas ni símbolos.
+* `Tool.isAvailable`: `smartHome` no se le ofrece a Gemini mientras no exista `smarthome.json`.
+* **Imágenes que no correspondían** (pedía gatos negros y salían atigrados, y al corregirle repetía las mismas): `searchImages` rehecha.
+  * Junta candidatas de Commons y Openverse y las ordena por las palabras de la búsqueda que aparecen en el título.
+  * Descarta las imágenes enseñadas recientemente.
+  * **Gemini verifica visualmente** las 8 mejores con el nuevo parámetro `description` («un gato completamente negro»), y solo se muestran las que pasan. Si ninguna vale, Apache lo dice en vez de enseñar algo incorrecto.
+
 ### Problemas encontrados
 
 * Sigue sin haber acceso a Maven/Gradle en el entorno de desarrollo remoto. Se compiló con `kotlinc` contra stubs todo lo que no depende de Exposed ni de Compose, y se probaron la detección de «¿qué hay en mi pantalla?», la lectura de adjuntos y la búsqueda de archivos (incluida la búsqueda sin tildes). El código de Compose y la nueva dependencia MQTT hay que comprobarlos al compilar en local.
