@@ -331,16 +331,16 @@ private fun Timeline(
                     placeBlocks(blocks).forEach { placed ->
                         val laneWidth = blocksWidth / placed.laneCount
                         val top = HOUR_HEIGHT * ((placed.startMinute - firstHour * 60) / 60f)
-                        val height = HOUR_HEIGHT * ((placed.endMinute - placed.startMinute) / 60f)
+                        val blockHeight = HOUR_HEIGHT * ((placed.endMinute - placed.startMinute) / 60f)
 
                         TimelineBlock(
                             event = placed.event,
                             selected = schedule.editingEventId == placed.event.id,
-                            height = height,
+                            blockHeight = blockHeight,
                             modifier = Modifier
                                 .offset(x = HOUR_LABEL_WIDTH + laneWidth * placed.lane, y = top + 8.dp)
                                 .width(laneWidth - 4.dp)
-                                .height(height - 2.dp),
+                                .height(blockHeight - 2.dp),
                             onClick = {
                                 schedule.beginEdit(placed.event)
                                 onBlockSelected()
@@ -393,7 +393,7 @@ private fun Timeline(
 private fun TimelineBlock(
     event: CalendarEventDto,
     selected: Boolean,
-    height: Dp,
+    blockHeight: Dp,
     modifier: Modifier,
     onClick: () -> Unit
 ) {
@@ -418,10 +418,10 @@ private fun TimelineBlock(
                 text = (if (event.status == "completed") "✓ " else "") + event.title,
                 color = Color.White,
                 fontSize = 13.sp,
-                maxLines = if (height < 40.dp) 1 else 2,
+                maxLines = if (blockHeight < 40.dp) 1 else 2,
                 overflow = TextOverflow.Ellipsis
             )
-            if (height >= 40.dp) {
+            if (blockHeight >= 40.dp) {
                 Text(
                     text = "${start.format(ScheduleController.HOUR)} – ${end.format(ScheduleController.HOUR)}",
                     color = textColor,
