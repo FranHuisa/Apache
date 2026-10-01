@@ -261,7 +261,8 @@ class Agent(
                                 toolName = tool.name,
                                 args = call.args,
                                 humanReadableWarning =
-                                    "Esta acción (${tool.name}) puede tener efectos importantes. ¿Quieres que continúe?"
+                                    "Esta acción (${tool.name}) puede tener efectos importantes. ¿Quieres que continúe?",
+                                callId = call.id
                             )
                         )
 
@@ -330,7 +331,9 @@ class Agent(
             memoryService.appendMessage(
                 pending.conversationId,
                 "function",
-                "${pending.toolName}\nEl usuario canceló la acción."
+                // Formato "nombre\nresultado\nid": sin el último salto de línea,
+                // GeminiClient no sabría separar el resultado del id y lo perdería.
+                "${pending.toolName}\nEl usuario canceló la acción.\n${pending.callId ?: ""}"
             )
 
             return runTurn(pending.conversationId, mutableListOf())
@@ -350,7 +353,7 @@ class Agent(
         memoryService.appendMessage(
             pending.conversationId,
             "function",
-            "${tool.name}\n$output"
+            "${tool.name}\n$output\n${pending.callId ?: ""}"
         )
 
         return runTurn(pending.conversationId, images)

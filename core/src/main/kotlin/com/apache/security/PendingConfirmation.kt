@@ -18,7 +18,10 @@ data class PendingConfirmation(
 
     val args: Map<String, Any?>,
 
-    val humanReadableWarning: String
+    val humanReadableWarning: String,
+
+    /** Id de la functionCall de Gemini, para devolver la respuesta asociada a ella. */
+    val callId: String? = null
 )
 
 /**
