@@ -101,6 +101,25 @@ class DatabaseFactory(
                 )
                 """.trimIndent()
             )
+
+            /*
+             * Listas del usuario (compra, tareas, maleta...). Tabla propia y
+             * aditiva, igual que en Apache Móvil.
+             */
+            exec(
+                """
+                CREATE TABLE IF NOT EXISTS user_list_item (
+                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    list_name VARCHAR(100) NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    done BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at DATETIME NOT NULL,
+                    done_at DATETIME NULL,
+                    INDEX idx_user_list_item (user_id, list_name)
+                )
+                """.trimIndent()
+            )
         }
     }
 }

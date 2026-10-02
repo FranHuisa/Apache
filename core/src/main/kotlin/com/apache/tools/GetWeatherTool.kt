@@ -27,7 +27,8 @@ import org.springframework.stereotype.Component
  */
 @Component
 class GetWeatherTool(
-    private val memoryService: UserMemoryService
+    private val memoryService: UserMemoryService,
+    private val ipLocation: IpLocation
 ) : Tool {
 
     override val name = "getWeather"
@@ -35,7 +36,7 @@ class GetWeatherTool(
     override val description =
         "Consulta el tiempo: ahora, hoy, mañana o los próximos días (temperatura, lluvia, viento). " +
             "Úsala siempre que pregunten por el tiempo, la lluvia, si hace frío o si llevar paraguas. " +
-            "Si el usuario no dice la ciudad, déjala vacía y se usará la de su memoria."
+            "Si el usuario no dice la ciudad, déjala vacía: se usa la de su memoria o, si no, la aproximada del PC."
 
     override val riskLevel = RiskLevel.READ_ONLY
 
@@ -76,10 +77,18 @@ class GetWeatherTool(
     )
 
     override fun execute(args: Map<String, Any?>): String {
-        val location = (args["location"] as? String)?.trim()?.ifBlank { null } ?: homeCity()
-            ?: return "No sé de qué ciudad. Pregúntale al usuario dónde vive y guárdalo con rememberFact (clave 'ciudad')."
-
         val days = ((args["days"] as? Number)?.toInt() ?: (args["days"] as? String)?.toIntOrNull() ?: 2).coerceIn(1, 7)
+
+        // Sin ciudad: la de su memoria y, si no, la aproximada por la IP del PC.
+        val location = (args["location"] as? String)?.trim()?.ifBlank { null } ?: homeCity()
+        if (location == null) {
+            val approx = ipLocation.current()
+                ?: return "No sé de qué ciudad. Pregúntale al usuario dónde vive y guárdalo con rememberFact (clave 'ciudad')."
+            val report = runCatching { forecastAt(approx.latitude, approx.longitude, approx.displayName, days) }.getOrNull()
+                ?: runCatching { wttr(approx.city, days) }.getOrNull()
+                ?: return "No he podido consultar el tiempo ahora mismo (sin conexión con el servicio del tiempo)."
+            return format(report, days) + "\n(Ubicación aproximada por la conexión del PC; si no es su ciudad, pregúntasela y guárdala.)"
+        }
 
         val report = runCatching { openMeteo(location, days) }.getOrNull()
             ?: runCatching { wttr(location, days) }.getOrNull()
@@ -114,9 +123,12 @@ class GetWeatherTool(
             break
         }
         val place = GeoLookup.choose(candidates, query) ?: return null
+        return forecastAt(place.latitude, place.longitude, place.displayName, days)
+    }
 
+    private fun forecastAt(latitude: Double, longitude: Double, placeName: String, days: Int): Report {
         val json = get(
-            "https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}" +
+            "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude" +
                 "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day" +
                 "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
                 "&forecast_days=${days.coerceIn(2, 7)}&timezone=auto"
@@ -135,7 +147,7 @@ class GetWeatherTool(
         }
         val code = current["weather_code"]?.asInt(-1) ?: -1
         return Report(
-            place = place.displayName,
+            place = placeName,
             temperature = current["temperature_2m"].asDouble(),
             feelsLike = current["apparent_temperature"]?.asDouble(),
             humidity = current["relative_humidity_2m"]?.asInt(),

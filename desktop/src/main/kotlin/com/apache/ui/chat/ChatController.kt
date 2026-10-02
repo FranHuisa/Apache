@@ -34,10 +34,10 @@ private const val MAX_PENDING = 5
 
 private const val DAILY_SUMMARY_PROMPT =
     "(Mensaje automático al abrir Apache por primera vez hoy, no lo menciones.) " +
-        "Dame mi resumen de hoy: salúdame por mi nombre si lo sabes, dime qué tengo hoy en el " +
-        "calendario y el horario, mis recordatorios y tareas pendientes, y el tiempo de hoy si " +
-        "sabes en qué ciudad estoy. Usa las herramientas que necesites. Muy breve: 2-4 líneas " +
-        "y, si no tengo nada, dilo en una frase."
+        "Dame mi resumen de buenos días: salúdame por mi nombre si lo sabes; qué tengo hoy en el " +
+        "calendario y el horario; recordatorios, tareas y listas pendientes (getList); el tiempo " +
+        "de hoy (getWeather sin ciudad) y 3 titulares (getNews). Usa las herramientas que " +
+        "necesites. Breve: unas 5 líneas, sin markdown, y lo que no haya, ni lo menciones."
 
 class ChatController(private val scope: CoroutineScope) {
 
