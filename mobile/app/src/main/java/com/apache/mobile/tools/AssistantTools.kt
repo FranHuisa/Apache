@@ -166,3 +166,22 @@ class SearchDiaryTool(private val app: ApacheApp) : Tool {
     private fun normalize(text: String) =
         Normalizer.normalize(text, Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "").lowercase()
 }
+
+// ---------------------------------------------------------------------------
+// Avisos proactivos bajo demanda
+// ---------------------------------------------------------------------------
+
+class GetAlertsTool(private val app: ApacheApp) : Tool {
+    override val name = "getAlerts"
+    override val description =
+        "Revisa si hay algo que el usuario deba saber ahora: lluvia cerca de sus eventos, un evento que " +
+            "empieza pronto, mañana empieza temprano sin alarma, o la compra lleva días pendiente. Para " +
+            "'¿algo que deba saber?', '¿me olvido de algo?'."
+    override val parameters = Schema.obj()
+
+    override suspend fun execute(args: JSONObject): String {
+        val notices = com.apache.mobile.reminders.Proactive.collect(app)
+        return if (notices.isEmpty()) "Nada importante ahora mismo."
+        else notices.joinToString("\n") { "- ${it.title}: ${it.text}" }
+    }
+}

@@ -71,6 +71,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     var isSpeaking by mutableStateOf(false)
         private set
 
+    /** El siguiente mensaje responde a "¿qué tal el día?" (aviso del diario). */
+    private var diaryPending = false
+
     /** Silencios seguidos: con dos, se acaba la conversación sola. */
     private var silences = 0
 
@@ -134,7 +137,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             isLoading = true
             try {
-                val reply = apache.agent.send(conversationId, text, attachments, fromVoice, hideUserMessage)
+                val context = if (diaryPending && !hideUserMessage) {
+                    diaryPending = false
+                    "Respondo a tu pregunta «¿qué tal el día?»: guárdalo en mi diario con saveDiaryEntry y contéstame en una frase."
+                } else null
+                val reply = apache.agent.send(conversationId, text, attachments, fromVoice, hideUserMessage, context)
                 conversationId = reply.conversationId
                 apache.settings.conversationId = reply.conversationId
                 messages = messages + local(reply.text, isUser = false, images = reply.images)
@@ -170,6 +177,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 "recordatorios pendientes y el tiempo si sabes mi ciudad. Muy breve: 2-4 líneas.",
             emptyList(), fromVoice = false, hideUserMessage = true
         )
+    }
+
+    /** Desde el aviso del diario: Apache pregunta qué tal el día. */
+    fun askAboutDay() {
+        diaryPending = true
+        messages = messages + local("¿Qué tal el día? Cuéntamelo en un par de frases (o toca el micro) y lo apunto en tu diario 📓", isUser = false)
+        shareCount++
     }
 
     fun newConversation() {

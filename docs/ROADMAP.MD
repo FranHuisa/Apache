@@ -93,22 +93,22 @@ Orden de trabajo: de lo más sencillo a lo más complejo.
 * [ ] PC: lo mismo con el modo escucha que ya existe
 
 ### 8.2 Rutinas por voz
-* [ ] Móvil: crear rutinas hablando («cuando diga *me voy a dormir*, pon alarma a las 7 y dime qué tengo mañana»)
-* [ ] Móvil: decir la frase ejecuta todos los pasos de la rutina
-* [ ] Móvil: ver, editar y borrar rutinas (en Memoria)
+* [x] Móvil: crear rutinas hablando («cuando diga *me voy a dormir*, pon alarma a las 7 y dime qué tengo mañana»)
+* [x] Móvil: decir la frase ejecuta todos los pasos de la rutina
+* [x] Móvil: ver, lanzar y borrar rutinas (en Memoria → Rutinas); para cambiar una, se vuelve a crear con la misma frase
 * [ ] PC: las mismas rutinas
 
 ### 8.3 Diario automático
-* [ ] Móvil: por la noche, aviso «¿qué tal el día?» (hora configurable)
-* [ ] Móvil: guarda una entrada por día con lo que cuentes, tu ánimo y lo que hiciste (agenda y listas)
-* [ ] Móvil: preguntas sobre el pasado: «¿qué hice el finde pasado?», «¿cuándo fui al médico?»
-* [ ] Móvil: ver el diario (en Memoria)
+* [x] Móvil: por la noche, aviso «¿qué tal el día?» (hora configurable)
+* [x] Móvil: guarda una entrada por día con lo que cuentes, tu ánimo y lo que hiciste (agenda y listas)
+* [x] Móvil: preguntas sobre el pasado: «¿qué hice el finde pasado?», «¿cuándo fui al médico?»
+* [x] Móvil: ver el diario (en Memoria)
 * [ ] PC: diario y preguntas
 
 ### 8.4 Apache proactivo
-* [ ] Móvil: comprobación cada ~2 h en segundo plano que cruza tiempo, agenda, listas y alarmas
-* [ ] Móvil: avisos tipo «va a llover a las 17:00 y tienes gimnasio a las 18:00», «mañana empiezas a las 8 y no tienes alarma», «llevas días sin tocar la compra»
-* [ ] Móvil: sin repetir el mismo aviso, horas de silencio (noche) y opción de desactivarlo en Ajustes
+* [x] Móvil: comprobación cada ~2 h en segundo plano que cruza tiempo, agenda, listas y alarmas
+* [x] Móvil: avisos tipo «va a llover a las 17:00 y tienes gimnasio a las 18:00», «mañana empiezas a las 8 y no tienes alarma», «llevas días sin tocar la compra»
+* [x] Móvil: sin repetir el mismo aviso, horas de silencio (noche) y opción de desactivarlo en Ajustes
 * [ ] PC: avisos proactivos mientras Apache está abierto
 
 ### Ideas para más adelante

@@ -44,6 +44,29 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_BRIEFING_TIME, "08:00").orEmpty().ifBlank { "08:00" }
         set(value) = prefs.edit().putString(KEY_BRIEFING_TIME, value).apply()
 
+    /** Aviso por la noche para el diario ("¿qué tal el día?") y su hora. */
+    var diaryEnabled: Boolean
+        get() = prefs.getBoolean(KEY_DIARY_ON, true)
+        set(value) = prefs.edit().putBoolean(KEY_DIARY_ON, value).apply()
+
+    var diaryTime: String
+        get() = prefs.getString(KEY_DIARY_TIME, "22:00").orEmpty().ifBlank { "22:00" }
+        set(value) = prefs.edit().putString(KEY_DIARY_TIME, value).apply()
+
+    /** Avisos proactivos (lluvia y agenda, alarma para mañana, compra olvidada...). */
+    var proactiveEnabled: Boolean
+        get() = prefs.getBoolean(KEY_PROACTIVE_ON, true)
+        set(value) = prefs.edit().putBoolean(KEY_PROACTIVE_ON, value).apply()
+
+    /** Avisos proactivos ya enviados ("2026-10-02|rain|12"), para no repetirlos. */
+    fun proactiveAlreadySent(key: String): Boolean = key in prefs.getStringSet(KEY_PROACTIVE_SENT, emptySet()).orEmpty()
+
+    fun markProactiveSent(key: String) {
+        val cutoff = java.time.LocalDate.now().minusDays(7).toString()
+        val kept = prefs.getStringSet(KEY_PROACTIVE_SENT, emptySet()).orEmpty().filter { it.substringBefore('|') >= cutoff }
+        prefs.edit().putStringSet(KEY_PROACTIVE_SENT, (kept + key).toSet()).apply()
+    }
+
     /**
      * Última ubicación conocida del móvil (se guarda cada vez que la app la
      * consigue). La usa el resumen de buenos días, que corre en segundo plano.
@@ -96,6 +119,10 @@ class Settings(context: Context) {
         private const val KEY_SUMMARY = "last_summary_date"
         private const val KEY_BRIEFING_ON = "briefing_enabled"
         private const val KEY_BRIEFING_TIME = "briefing_time"
+        private const val KEY_DIARY_ON = "diary_enabled"
+        private const val KEY_DIARY_TIME = "diary_time"
+        private const val KEY_PROACTIVE_ON = "proactive_enabled"
+        private const val KEY_PROACTIVE_SENT = "proactive_sent"
         private const val KEY_LAT = "last_latitude"
         private const val KEY_LON = "last_longitude"
         private const val KEY_PLACE = "last_place"

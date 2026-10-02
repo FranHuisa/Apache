@@ -18,5 +18,7 @@ class BootReceiver : BroadcastReceiver() {
         val now = LocalDateTime.now()
         app.events.between(now, now.plusDays(60)).forEach { app.alarms.scheduleEvent(it) }
         app.alarms.scheduleBriefing()
+        app.alarms.scheduleDiary()
+        app.alarms.scheduleProactive()
     }
 }

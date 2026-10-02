@@ -31,6 +31,7 @@ class ToolRegistry(private val tools: List<Tool>) {
                 DeleteRoutineTool(app),
                 SaveDiaryEntryTool(app),
                 SearchDiaryTool(app),
+                GetAlertsTool(app),
                 WebSearchTool(gemini),
                 SearchImagesTool(gemini),
                 SaveImageTool(app),

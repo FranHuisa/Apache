@@ -68,7 +68,29 @@ object WeatherService {
         throw last ?: IllegalStateException("Sin respuesta")
     }
 
-    private suspend fun openMeteo(query: String, days: Int): WeatherReport? {
+    /** Coordenadas de un sitio por su nombre (o null). */
+    suspend fun locate(query: String): GeoCandidate? = withContext(Dispatchers.IO) {
+        runCatching { geocode(query) }.getOrNull()
+    }
+
+    /**
+     * Probabilidad de lluvia hora a hora (próximas 24 h) en unas coordenadas,
+     * para los avisos proactivos.
+     */
+    suspend fun hourlyRain(latitude: Double, longitude: Double): List<Pair<java.time.LocalDateTime, Int>> =
+        withContext(Dispatchers.IO) {
+            val hourly = getJson(
+                "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude" +
+                    "&hourly=precipitation_probability&forecast_days=2&timezone=auto"
+            ).getJSONObject("hourly")
+            val times = hourly.getJSONArray("time")
+            val rain = hourly.getJSONArray("precipitation_probability")
+            (0 until times.length()).mapNotNull { i ->
+                if (rain.isNull(i)) null else java.time.LocalDateTime.parse(times.getString(i)) to rain.optInt(i)
+            }
+        }
+
+    private suspend fun geocode(query: String): GeoCandidate? {
         var candidates = emptyList<GeoCandidate>()
         for (term in GeoLookup.searchTerms(query)) {
             val results = getJson(
@@ -83,7 +105,11 @@ object WeatherService {
             }
             if (candidates.isNotEmpty()) break
         }
-        val place = GeoLookup.choose(candidates, query) ?: return null
+        return GeoLookup.choose(candidates, query)
+    }
+
+    private suspend fun openMeteo(query: String, days: Int): WeatherReport? {
+        val place = geocode(query) ?: return null
         return forecast(place.latitude, place.longitude, place.displayName, days)
     }
 

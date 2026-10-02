@@ -43,6 +43,7 @@ import com.apache.mobile.ApacheApp
 import com.apache.mobile.data.Settings
 import com.apache.mobile.reminders.Briefing
 import com.apache.mobile.reminders.Notifications
+import com.apache.mobile.reminders.Proactive
 import java.time.LocalTime
 import kotlinx.coroutines.launch
 
@@ -61,6 +62,11 @@ fun SettingsScreen(onSaved: () -> Unit) {
     var briefingTime by remember { mutableStateOf(settings.briefingTime) }
     var testing by remember { mutableStateOf(false) }
     var preview by remember { mutableStateOf<String?>(null) }
+    var diaryOn by remember { mutableStateOf(settings.diaryEnabled) }
+    var diaryTime by remember { mutableStateOf(settings.diaryTime) }
+    var proactiveOn by remember { mutableStateOf(settings.proactiveEnabled) }
+    var checking by remember { mutableStateOf(false) }
+    var alerts by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -170,6 +176,81 @@ fun SettingsScreen(onSaved: () -> Unit) {
                 }
             ) { Text(if (testing) "Preparando…" else "Probar ahora", color = ApacheColors.accentLight) }
             preview?.let {
+                Surface(color = ApacheColors.card, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                    Text(it, color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(14.dp))
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Diario: aviso por la noche.
+        Text("Diario", color = ApacheColors.accent, fontSize = 15.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Preguntarme «¿qué tal el día?»", color = Color.White, fontSize = 15.sp)
+                Text("Un aviso por la noche para apuntar tu día.", color = ApacheColors.textMuted, fontSize = 13.sp)
+            }
+            Switch(
+                checked = diaryOn,
+                onCheckedChange = {
+                    diaryOn = it
+                    settings.diaryEnabled = it
+                    ApacheApp.get().alarms.scheduleDiary()
+                },
+                colors = SwitchDefaults.colors(checkedTrackColor = ApacheColors.accent)
+            )
+        }
+        if (diaryOn) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Hora", color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                fun shiftDiary(minutes: Long) {
+                    val time = runCatching { LocalTime.parse(diaryTime) }.getOrDefault(LocalTime.of(22, 0)).plusMinutes(minutes)
+                    diaryTime = "%02d:%02d".format(time.hour, time.minute)
+                    settings.diaryTime = diaryTime
+                    ApacheApp.get().alarms.scheduleDiary()
+                }
+                IconButton(onClick = { shiftDiary(-15) }) { Icon(Icons.Filled.Remove, contentDescription = "Antes", tint = ApacheColors.accentLight) }
+                Text(diaryTime, color = Color.White, fontSize = 20.sp)
+                IconButton(onClick = { shiftDiary(15) }) { Icon(Icons.Filled.Add, contentDescription = "Después", tint = ApacheColors.accentLight) }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Apache proactivo.
+        Text("Apache proactivo", color = ApacheColors.accent, fontSize = 15.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Avisarme sin que pregunte", color = Color.White, fontSize = 15.sp)
+                Text(
+                    "Lluvia y tus planes, mañana sin alarma, la compra olvidada… Nunca de 23:00 a 8:00.",
+                    color = ApacheColors.textMuted, fontSize = 13.sp
+                )
+            }
+            Switch(
+                checked = proactiveOn,
+                onCheckedChange = {
+                    proactiveOn = it
+                    settings.proactiveEnabled = it
+                    ApacheApp.get().alarms.scheduleProactive()
+                },
+                colors = SwitchDefaults.colors(checkedTrackColor = ApacheColors.accent)
+            )
+        }
+        if (proactiveOn) {
+            TextButton(
+                enabled = !checking,
+                onClick = {
+                    checking = true
+                    scope.launch {
+                        val notices = Proactive.collect(ApacheApp.get())
+                        alerts = if (notices.isEmpty()) "Ahora mismo no hay nada que avisar." else notices.joinToString("\n\n") { "${it.title}\n${it.text}" }
+                        checking = false
+                    }
+                }
+            ) { Text(if (checking) "Mirando…" else "¿Hay algo que avisar ahora?", color = ApacheColors.accentLight) }
+            alerts?.let {
                 Surface(color = ApacheColors.card, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                     Text(it, color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(14.dp))
                 }

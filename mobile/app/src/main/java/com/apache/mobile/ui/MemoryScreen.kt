@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Search
@@ -41,6 +42,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -65,7 +67,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.apache.mobile.ApacheApp
 import com.apache.mobile.data.ConversationSummary
+import com.apache.mobile.data.DiaryEntry
 import com.apache.mobile.data.MemoryFact
+import com.apache.mobile.data.Routine
 import com.apache.mobile.data.MemoryStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -89,10 +93,16 @@ fun MemoryScreen(chat: ChatViewModel, onOpenChat: () -> Unit) {
     var query by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(setOf("personal")) }
 
-    LaunchedEffect(reloadKey) {
+    var diary by remember { mutableStateOf<List<DiaryEntry>>(emptyList()) }
+    var routines by remember { mutableStateOf<List<Routine>>(emptyList()) }
+
+    LaunchedEffect(reloadKey, chat.messages.size) {
         val (loadedFacts, loadedConversations) = withContext(Dispatchers.IO) { app.memory.all() to app.conversations.list() }
         facts = loadedFacts
         conversations = loadedConversations
+        val (loadedDiary, loadedRoutines) = withContext(Dispatchers.IO) { app.diary.recent(90) to app.routines.all() }
+        diary = loadedDiary
+        routines = loadedRoutines
     }
 
     val visibleFacts = if (query.isBlank()) facts else facts.filter {
@@ -110,7 +120,7 @@ fun MemoryScreen(chat: ChatViewModel, onOpenChat: () -> Unit) {
                 Column {
                     Text("Memoria", color = Color.White, fontSize = 24.sp)
                     Text(
-                        "${facts.size} datos · ${conversations.size} conversaciones",
+                        "${facts.size} datos · ${diary.size} días en el diario · ${routines.size} rutinas",
                         color = ApacheColors.textMuted, fontSize = 13.sp
                     )
                 }
@@ -123,7 +133,7 @@ fun MemoryScreen(chat: ChatViewModel, onOpenChat: () -> Unit) {
                 modifier = Modifier.padding(horizontal = 18.dp).fillMaxWidth()
                     .clip(RoundedCornerShape(50)).background(ApacheColors.surface).padding(4.dp)
             ) {
-                listOf("Lo que sabe de ti", "Conversaciones").forEachIndexed { index, label ->
+                listOf("Sobre ti", "Diario", "Rutinas", "Charlas").forEachIndexed { index, label ->
                     val selected = tab == index
                     val bg by animateColorAsState(if (selected) ApacheColors.accent else Color.Transparent, label = "tab$index")
                     Box(
@@ -131,7 +141,7 @@ fun MemoryScreen(chat: ChatViewModel, onOpenChat: () -> Unit) {
                             .clickable { tab = index }.padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(label, color = if (selected) Color.Black else ApacheColors.textMuted, fontSize = 14.sp)
+                        Text(label, color = if (selected) Color.Black else ApacheColors.textMuted, fontSize = 13.sp)
                     }
                 }
             }
@@ -188,6 +198,23 @@ fun MemoryScreen(chat: ChatViewModel, onOpenChat: () -> Unit) {
                             }
                         }
                     }
+                } else if (tab == 1) {
+                    diaryItems(diary, onAsk = { chat.askAboutDay(); onOpenChat() }, onDelete = { entry ->
+                        scope.launch {
+                            withContext(Dispatchers.IO) { app.diary.delete(entry.day) }
+                            reloadKey++
+                        }
+                    })
+                } else if (tab == 2) {
+                    routineItems(routines, onDelete = { routine ->
+                        scope.launch {
+                            withContext(Dispatchers.IO) { app.routines.delete(routine.id) }
+                            reloadKey++
+                        }
+                    }, onRun = { routine ->
+                        chat.send(routine.trigger)
+                        onOpenChat()
+                    })
                 } else {
                     item {
                         Surface(
@@ -390,4 +417,95 @@ private fun FactDialog(fact: MemoryFact?, onDismiss: () -> Unit, onChanged: () -
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = ApacheColors.textMuted) } }
     )
+}
+
+private val DIARY_DAY = java.time.format.DateTimeFormatter.ofPattern("EEEE d 'de' MMMM", java.util.Locale.forLanguageTag("es-ES"))
+
+private fun moodEmoji(mood: String?): String {
+    val m = mood?.lowercase().orEmpty()
+    return when {
+        m.isEmpty() -> "📓"
+        listOf("feliz", "content", "genial", "bien", "alegre", "motivad").any { m.contains(it) } -> "😊"
+        listOf("cansad", "agotad").any { m.contains(it) } -> "😴"
+        listOf("triste", "mal", "baj").any { m.contains(it) } -> "😔"
+        listOf("estres", "agobi", "nervios", "ansios").any { m.contains(it) } -> "😣"
+        listOf("enfad", "molest").any { m.contains(it) } -> "😠"
+        else -> "🙂"
+    }
+}
+
+/** Pestaña Diario: un día por tarjeta, con el ánimo. */
+private fun LazyListScope.diaryItems(entries: List<DiaryEntry>, onAsk: () -> Unit, onDelete: (DiaryEntry) -> Unit) {
+    item {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color.Transparent,
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(ApacheGradient).clickable(onClick = onAsk)
+        ) {
+            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("📓", fontSize = 20.sp)
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text("Contarle a Apache qué tal el día", color = Color.Black, fontSize = 15.sp)
+                    Text("Luego pregúntale «¿qué hice el finde?»", color = Color(0xCC000000), fontSize = 12.sp)
+                }
+            }
+        }
+    }
+    if (entries.isEmpty()) {
+        item { Text("Tu diario está vacío. Cada noche Apache te preguntará qué tal el día.", color = ApacheColors.textMuted, fontSize = 14.sp) }
+    }
+    items(entries, key = { "diary${it.day}" }) { entry ->
+        Surface(color = ApacheColors.card, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(moodEmoji(entry.mood), fontSize = 22.sp)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(entry.day.format(DIARY_DAY).replaceFirstChar { it.titlecase() }, color = Color.White, fontSize = 15.sp)
+                        entry.mood?.let { Text(it, color = ApacheColors.accentSoft, fontSize = 12.sp) }
+                    }
+                    IconButton(onClick = { onDelete(entry) }) {
+                        Icon(Icons.Filled.DeleteOutline, contentDescription = "Borrar", tint = ApacheColors.textFaint)
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(entry.text, color = ApacheColors.textMuted, fontSize = 14.sp)
+            }
+        }
+    }
+}
+
+/** Pestaña Rutinas: frase y pasos; se pueden lanzar o borrar. */
+private fun LazyListScope.routineItems(routines: List<Routine>, onDelete: (Routine) -> Unit, onRun: (Routine) -> Unit) {
+    item {
+        Surface(color = ApacheColors.card, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Crea rutinas hablando", color = Color.White, fontSize = 15.sp)
+                Text(
+                    "Dile a Apache: «cuando diga me voy a dormir, pon una alarma a las 7, dime qué tengo mañana y cuánto voy a dormir». " +
+                        "Luego basta con decir la frase.",
+                    color = ApacheColors.textMuted, fontSize = 13.sp
+                )
+            }
+        }
+    }
+    items(routines, key = { "routine${it.id}" }) { routine ->
+        Surface(color = ApacheColors.cardAlt, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("«${routine.trigger}»", color = ApacheColors.accentLight, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { onRun(routine) }) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = "Ejecutar", tint = ApacheColors.accent)
+                    }
+                    IconButton(onClick = { onDelete(routine) }) {
+                        Icon(Icons.Filled.DeleteOutline, contentDescription = "Borrar", tint = ApacheColors.textFaint)
+                    }
+                }
+                routine.steps.forEachIndexed { index, step ->
+                    Text("${index + 1}. $step", color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(vertical = 2.dp))
+                }
+            }
+        }
+    }
 }

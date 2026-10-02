@@ -17,6 +17,26 @@ class ReminderReceiver : BroadcastReceiver() {
         val id = intent.getLongExtra(EXTRA_ID, -1)
         if (id <= 0) return
 
+        when (intent.getStringExtra(EXTRA_KIND)) {
+            AlarmScheduler.KIND_DIARY -> {
+                Notifications.showDiaryPrompt(context)
+                app.alarms.scheduleDiary()
+                return
+            }
+            AlarmScheduler.KIND_PROACTIVE -> {
+                val pending = goAsync()
+                CoroutineScope(Dispatchers.Default).launch {
+                    try {
+                        Proactive.check(app)
+                    } catch (e: Exception) {
+                    } finally {
+                        pending.finish()
+                    }
+                }
+                return
+            }
+        }
+
         if (intent.getStringExtra(EXTRA_KIND) == AlarmScheduler.KIND_BRIEFING) {
             // Necesita internet (tiempo y noticias): se hace en segundo plano y se programa el de mañana.
             val pending = goAsync()

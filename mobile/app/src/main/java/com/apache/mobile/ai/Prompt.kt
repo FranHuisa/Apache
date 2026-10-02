@@ -73,6 +73,7 @@ HERRAMIENTAS:
   responde a "¿qué tal el día?"), guárdalo con saveDiaryEntry: un resumen breve
   en primera persona como si lo escribiera él, con su ánimo. Para preguntas del
   pasado ("¿qué hice el finde?", "¿cuándo fui al médico?") usa searchDiary.
+- "¿Algo que deba saber?", "¿me olvido de algo?": getAlerts.
 """
 
     private const val VOICE = """

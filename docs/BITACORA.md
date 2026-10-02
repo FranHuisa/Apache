@@ -1,5 +1,13 @@
 # Bitácora de desarrollo — Apache
 
+## 02/10/2026 (amanecer) — Fase 8 en el móvil: manos libres, rutinas, diario y Apache proactivo
+
+* **Conversación manos libres:** botón 🎧 en el chat y en Inicio. Apache dice «Dime», escucha, responde en voz alta y vuelve a escuchar solo. Termina con «para», «gracias, ya está», el botón rojo, la tecla atrás o dos silencios seguidos. Pantalla completa con el orbe que cambia según escucha, piensa o habla. `Speaker` avisa al terminar de hablar (UtteranceProgressListener).
+* **Rutinas por voz:** tabla `routine` (base de datos versión 3). `createRoutine`, `listRoutines` y `deleteRoutine`. Al decir la frase (o casi), el Agent manda a Gemini los pasos de la rutina; además todas las rutinas van en la instrucción de sistema por si se dice parecida. MAX_STEPS sube de 6 a 10. Pestaña Memoria → Rutinas para verlas, lanzarlas (▶) o borrarlas.
+* **Diario:** tabla `diary` (un día por fila). `saveDiaryEntry` y `searchDiary` (busca en el diario y en el calendario de hasta 2 años atrás, por fechas o palabras). Aviso a las 22:00 «¿Qué tal el día?»; al tocarlo, el chat lo pregunta y la respuesta se guarda. Pestaña Memoria → Diario con el ánimo de cada día. Hora configurable en Ajustes.
+* **Apache proactivo:** `Proactive.check` cada ~2 h (AlarmManager inexacto, sin gastar Gemini). Avisa de lluvia cerca de la hora de tus eventos (o pronto, si no hay eventos), de eventos con lugar que empiezan en ~1 h, de que mañana empiezas temprano sin alarma (con botón «Poner alarma a las…»), y de la compra olvidada más de 3 días. Sin repetir avisos, como mucho 2 a la vez y nunca de 23:00 a 8:00. Se puede apagar en Ajustes y probar con «¿Hay algo que avisar ahora?». También por chat: «¿algo que deba saber?» (`getAlerts`).
+* La parte de PC de la fase 8 queda en el roadmap.
+
 ## 02/10/2026 (madrugada, 2) — Resumen de buenos días, ubicación, listas y compartir
 
 ### Móvil

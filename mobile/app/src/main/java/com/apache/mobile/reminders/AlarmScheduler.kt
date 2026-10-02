@@ -41,6 +41,35 @@ class AlarmScheduler(private val context: Context) {
         schedule(KIND_BRIEFING, BRIEFING_ID, next)
     }
 
+    /** Aviso de la noche para el diario. */
+    fun scheduleDiary() {
+        val settings = (context.applicationContext as com.apache.mobile.ApacheApp).settings
+        cancel(KIND_DIARY, DIARY_ID)
+        if (!settings.diaryEnabled) return
+        val time = runCatching { java.time.LocalTime.parse(settings.diaryTime) }.getOrDefault(java.time.LocalTime.of(22, 0))
+        var next = java.time.LocalDate.now().atTime(time)
+        if (!next.isAfter(LocalDateTime.now())) next = next.plusDays(1)
+        schedule(KIND_DIARY, DIARY_ID, next)
+    }
+
+    /**
+     * Comprobación proactiva cada 2 horas (aproximada: Android la agrupa con
+     * otras para ahorrar batería).
+     */
+    fun scheduleProactive() {
+        val settings = (context.applicationContext as com.apache.mobile.ApacheApp).settings
+        val intent = pendingIntent(KIND_PROACTIVE, PROACTIVE_ID)
+        alarmManager.cancel(intent)
+        if (!settings.proactiveEnabled) return
+        val interval = 2 * AlarmManager.INTERVAL_HOUR
+        alarmManager.setInexactRepeating(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            android.os.SystemClock.elapsedRealtime() + 15 * 60 * 1000L,
+            interval,
+            intent
+        )
+    }
+
     private fun schedule(kind: String, id: Long, at: LocalDateTime) {
         if (at.isBefore(LocalDateTime.now())) return
         val millis = at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
@@ -65,6 +94,8 @@ class AlarmScheduler(private val context: Context) {
         val requestCode = when (kind) {
             KIND_EVENT -> 1_000_000
             KIND_BRIEFING -> 2_000_000
+            KIND_DIARY -> 2_100_000
+            KIND_PROACTIVE -> 2_200_000
             else -> 0
         } + (id % 1_000_000).toInt()
         return PendingIntent.getBroadcast(
@@ -78,5 +109,9 @@ class AlarmScheduler(private val context: Context) {
         const val KIND_EVENT = "event"
         const val KIND_BRIEFING = "briefing"
         const val BRIEFING_ID = 1L
+        const val KIND_DIARY = "diary"
+        const val DIARY_ID = 1L
+        const val KIND_PROACTIVE = "proactive"
+        const val PROACTIVE_ID = 1L
     }
 }

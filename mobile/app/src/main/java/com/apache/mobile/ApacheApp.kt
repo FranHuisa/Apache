@@ -64,6 +64,8 @@ class ApacheApp : Application() {
 
         Notifications.createChannels(this)
         alarms.scheduleBriefing()
+        alarms.scheduleDiary()
+        alarms.scheduleProactive()
 
         val gemini = GeminiClient(settings)
         val tools = ToolRegistry.create(this, gemini)

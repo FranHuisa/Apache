@@ -42,7 +42,9 @@ class Agent(
         text: String,
         attachments: List<Attachment> = emptyList(),
         fromVoice: Boolean = false,
-        hideUserMessage: Boolean = false
+        hideUserMessage: Boolean = false,
+        /** Contexto extra solo para Gemini (no se guarda ni se enseña). */
+        extraContext: String? = null
     ): AgentReply = withContext(Dispatchers.IO) {
 
         val convId = conversationId?.takeIf { conversations.exists(it) } ?: conversations.create()
@@ -59,7 +61,7 @@ class Agent(
                 "y al final resúmelo en una o dos frases:\n" +
                 routine.steps.mapIndexed { i, step -> "${i + 1}. $step" }.joinToString("\n") + ")"
         }
-        val userContent = userContent(geminiText, attachments)
+        val userContent = userContent(if (extraContext == null) geminiText else "$geminiText\n\n($extraContext)", attachments)
         val storedText = if (attachments.isEmpty()) userText else "$userText\n[Adjuntos: ${attachments.joinToString { it.name }}]"
         val storedContent = userContent(storedText, emptyList())
 

@@ -27,6 +27,12 @@ class TaskStore(private val db: ApacheDatabase) {
             "SELECT * FROM task WHERE list_name = ? ORDER BY done, id", arrayOf(listName(list))
         ).mapRows { it.toItem() }
 
+    /** Pendientes de una lista con la fecha en que se apuntaron (para los avisos proactivos). */
+    fun pendingSince(list: String): List<Pair<TaskItem, java.time.LocalDateTime>> =
+        db.readableDatabase.rawQuery(
+            "SELECT * FROM task WHERE list_name = ? AND done = 0 ORDER BY created_at", arrayOf(listName(list))
+        ).mapRows { it.toItem() to java.time.LocalDateTime.parse(it.string("created_at")) }
+
     fun pending(): List<TaskItem> =
         db.readableDatabase.rawQuery("SELECT * FROM task WHERE done = 0 ORDER BY list_name, id", null)
             .mapRows { it.toItem() }

@@ -16,6 +16,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.apache.mobile.reminders.Notifications
 import com.apache.mobile.tools.DeviceLocation
 import com.apache.mobile.ui.TasksScreen
 import kotlinx.coroutines.launch
@@ -79,12 +80,21 @@ class MainActivity : ComponentActivity() {
     /** Lo que llega con "Compartir → Apache" antes de que el chat esté listo. */
     private var pendingShare by mutableStateOf<SharedContent?>(null)
 
+    /** Se abrió desde el aviso del diario ("¿qué tal el día?"). */
+    private var pendingDiary by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) pendingShare = readShare(intent)
+        if (savedInstanceState == null) {
+            pendingShare = readShare(intent)
+            pendingDiary = intent?.getStringExtra(Notifications.EXTRA_OPEN) == Notifications.OPEN_DIARY
+        }
         setContent {
             ApacheTheme {
-                ApacheMobileApp(pendingShare, onShareConsumed = { pendingShare = null })
+                ApacheMobileApp(
+                    pendingShare, onShareConsumed = { pendingShare = null },
+                    openDiary = pendingDiary, onDiaryConsumed = { pendingDiary = false }
+                )
             }
         }
     }
@@ -92,6 +102,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         readShare(intent)?.let { pendingShare = it }
+        if (intent.getStringExtra(Notifications.EXTRA_OPEN) == Notifications.OPEN_DIARY) pendingDiary = true
     }
 
     /** Texto, enlace o imágenes compartidos desde otra app. */
@@ -120,7 +131,12 @@ private enum class Section(val label: String, val icon: ImageVector) {
 }
 
 @Composable
-private fun ApacheMobileApp(share: SharedContent?, onShareConsumed: () -> Unit) {
+private fun ApacheMobileApp(
+    share: SharedContent?,
+    onShareConsumed: () -> Unit,
+    openDiary: Boolean,
+    onDiaryConsumed: () -> Unit
+) {
     val chat: ChatViewModel = viewModel()
     val settings = ApacheApp.get().settings
     val context = LocalContext.current
@@ -145,6 +161,15 @@ private fun ApacheMobileApp(share: SharedContent?, onShareConsumed: () -> Unit) 
         val missing = wanted.filter { ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isNotEmpty()) permissions.launch(missing.toTypedArray()) else DeviceLocation.current()
         chat.dailySummaryIfNeeded()
+    }
+
+    // Aviso del diario: el chat pregunta "¿qué tal el día?".
+    LaunchedEffect(openDiary) {
+        if (openDiary) {
+            chat.askAboutDay()
+            section = Section.CHAT
+            onDiaryConsumed()
+        }
     }
 
     // Compartir → Apache: se abre el chat con lo compartido.
