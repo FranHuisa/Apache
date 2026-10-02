@@ -1,5 +1,54 @@
 # Bitácora de desarrollo — Apache
 
+## 02/10/2026 — feature/movil: Apache Móvil 0.1.0 (Android)
+
+### Objetivo
+
+Llevar Apache al móvil como app Android **independiente del PC**, en Kotlin y con Jetpack Compose.
+
+### Decisiones
+
+* **Independiente**: Gemini se llama desde el móvil con la API key de Ajustes y los datos viven en SQLite del teléfono. No usa el Core ni MySQL, así que funciona con el PC apagado. A cambio, no comparte memoria ni calendario con el escritorio.
+* **Proyecto Gradle aparte** en `mobile/`, para que el Android Gradle Plugin no afecte a la compilación del Desktop. Se abre en Android Studio con File › Open › `mobile`.
+* **SQLite sin Room**: sin procesadores de anotaciones (KSP/kapt), menos piezas que puedan fallar al compilar.
+* **Historial con el contenido exacto de Gemini** (`content_json`), incluidas las firmas de las llamadas a herramientas. Todas las respuestas de herramientas de un paso se devuelven juntas, que es lo que pide la API. Es más limpio que el formato de texto del Core de escritorio.
+* Voz con el **reconocimiento y el TTS de Android**: gratis y sin gastar llamadas a Gemini.
+
+### Trabajo realizado
+
+* Esqueleto: AGP 8.5.2, Kotlin 1.9.24, Compose BOM 2024.06.00, minSdk 26 / targetSdk 34, manifiesto con permisos (internet, micrófono, notificaciones, alarmas exactas, arranque, alarmas del reloj) y `queries` de Android 11+.
+* Datos: `ApacheDatabase` (conversation, message, memory, event, reminder), stores y `Settings` (API key, modelo, voz, conversación actual).
+* IA: `GeminiClient` (reintentos 503/429/timeouts y errores claros), `Agent` (bucle de herramientas, respuestas directas para acciones simples, recorte de historial seguro) y `Prompt` (mismo estilo que el escritorio + modo voz).
+* Herramientas:
+  * getWeather, webSearch, searchImages (verificadas con Gemini) y saveImage (galería).
+  * rememberFact / forgetFact.
+  * Calendario completo y planDaySchedule.
+  * Recordatorios.
+  * openApp, setAlarm, setTimer y playSong.
+* Avisos: `AlarmScheduler` (AlarmManager exacto si se permite), `ReminderReceiver` (recordatorios y comienzo de bloques) y `BootReceiver` (reprograma al reiniciar).
+* Interfaz Compose:
+  * **Chat**: imágenes numeradas, tocar = guardar, 📎, 🎤 y voz.
+  * **Horario**: bloques del día, diálogo de edición, «Organizar mi día» y recordatorios.
+  * **Memoria**: datos y conversaciones.
+  * **Ajustes**.
+* `mobile/README.md` con los pasos para abrirla y probarla en el móvil.
+
+### Problemas encontrados
+
+* No hay Android SDK ni repositorio de Google en el entorno remoto. La lógica (datos, IA, herramientas, avisos y voz) se compiló con `kotlinc` contra el `android.jar` real de la API 34 más stubs de OkHttp, corrutinas y AndroidX core. Eso detectó un error real en `Speaker` (inicialización recursiva del TTS), ya corregido. **La interfaz Compose se ha revisado a mano: hay que compilarla en Android Studio.**
+
+### Estado
+
+* [x] Proyecto Android en `mobile/`
+* [x] Base de datos local y ajustes
+* [x] Gemini + agente + 18 herramientas
+* [x] Recordatorios y avisos del horario con notificación
+* [x] Interfaz Jetpack Compose (Chat, Horario, Memoria, Ajustes)
+* [x] Voz (reconocimiento y lectura)
+* [ ] Compilar y probar en un móvil real
+* [ ] Icono definitivo
+* [ ] Sincronizar con Apache de escritorio (opcional, en el futuro)
+
 ## 02/10/2026 — Versión 0.2.0
 
 ### Qué incluye Apache 0.2.0

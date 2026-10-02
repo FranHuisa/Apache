@@ -75,6 +75,7 @@
 * [x] Confirmaciones para acciones sensibles
 * [ ] Sistema avanzado de permisos
 * [ ] Auditoría de acciones
-* [ ] Android
+* [x] Android: Apache Móvil 0.1.0, app independiente en `mobile/` (Kotlin + Jetpack Compose)
+* [ ] Sincronización móvil ↔ escritorio
 * [ ] Docker
 * [ ] GitHub / CI
