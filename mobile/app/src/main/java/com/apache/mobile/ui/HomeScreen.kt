@@ -55,6 +55,7 @@ import com.apache.mobile.tools.CurrentWeather
 import com.apache.mobile.tools.WeatherService
 import com.apache.mobile.ui.components.ApacheOrb
 import com.apache.mobile.ui.components.MicButton
+import com.apache.mobile.ui.components.SuggestionPill
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -71,7 +72,13 @@ private val TODAY = DateTimeFormatter.ofPattern("EEEE d 'de' MMMM", Locale.forLa
  * Las tarjetas aparecen con una pequeña animación escalonada.
  */
 @Composable
-fun HomeScreen(chat: ChatViewModel, onOpenChat: () -> Unit, onOpenSchedule: () -> Unit, onMic: () -> Unit) {
+fun HomeScreen(
+    chat: ChatViewModel,
+    onOpenChat: () -> Unit,
+    onOpenSchedule: () -> Unit,
+    onMic: () -> Unit,
+    onConversation: () -> Unit = {}
+) {
     val app = ApacheApp.get()
 
     var name by remember { mutableStateOf<String?>(null) }
@@ -264,6 +271,8 @@ fun HomeScreen(chat: ChatViewModel, onOpenChat: () -> Unit, onOpenSchedule: () -
         Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             MicButton(listening = chat.isListening, enabled = !chat.isLoading, onClick = onMic, size = 64.dp)
             Text("Toca y habla", color = ApacheColors.textFaint, fontSize = 12.sp)
+            Spacer(modifier = Modifier.height(10.dp))
+            SuggestionPill("🎧  Conversación manos libres", onClick = onConversation)
         }
 
         Spacer(modifier = Modifier.height(24.dp))

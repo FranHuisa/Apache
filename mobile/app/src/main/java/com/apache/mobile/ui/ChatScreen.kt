@@ -40,6 +40,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddComment
+import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
@@ -84,7 +85,7 @@ private val SUGGESTIONS = listOf(
 
 /** Pantalla de chat con Apache: mensajes animados, imágenes, adjuntos y voz. */
 @Composable
-fun ChatScreen(chat: ChatViewModel, onMic: () -> Unit) {
+fun ChatScreen(chat: ChatViewModel, onMic: () -> Unit, onConversation: () -> Unit = {}) {
     val context = LocalContext.current
     var input by remember { mutableStateOf("") }
 
@@ -126,6 +127,9 @@ fun ChatScreen(chat: ChatViewModel, onMic: () -> Unit) {
                     color = if (chat.isLoading || chat.isListening) ApacheColors.accentLight else ApacheColors.textFaint,
                     fontSize = 12.sp
                 )
+            }
+            IconButton(onClick = onConversation, enabled = !chat.isLoading) {
+                Icon(Icons.Filled.Headset, contentDescription = "Conversación manos libres", tint = ApacheColors.accentLight)
             }
             IconButton(onClick = { chat.newConversation() }, enabled = !chat.isLoading) {
                 Icon(Icons.Filled.AddComment, contentDescription = "Nueva conversación", tint = ApacheColors.accentLight)

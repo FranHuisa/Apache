@@ -87,9 +87,9 @@ con una frase, se pueda hablar con él sin tocar la pantalla y recuerde tu día.
 Orden de trabajo: de lo más sencillo a lo más complejo.
 
 ### 8.1 Modo conversación manos libres
-* [ ] Móvil: botón «Conversación» que encadena escuchar → responder en voz alta → volver a escuchar
-* [ ] Móvil: se corta solo con «para», «gracias, ya está» o tras unos segundos de silencio
-* [ ] Móvil: pantalla a pantalla completa con el orbe animado mientras dura
+* [x] Móvil: botón «Conversación» que encadena escuchar → responder en voz alta → volver a escuchar
+* [x] Móvil: se corta solo con «para», «gracias, ya está» o tras unos segundos de silencio
+* [x] Móvil: pantalla completa con el orbe animado mientras dura
 * [ ] PC: lo mismo con el modo escucha que ya existe
 
 ### 8.2 Rutinas por voz

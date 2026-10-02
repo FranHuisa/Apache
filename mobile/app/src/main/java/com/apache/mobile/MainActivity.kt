@@ -26,7 +26,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
@@ -63,6 +67,7 @@ import com.apache.mobile.ui.ApacheColors
 import com.apache.mobile.ui.ApacheTheme
 import com.apache.mobile.ui.ChatScreen
 import com.apache.mobile.ui.ChatViewModel
+import com.apache.mobile.ui.ConversationOverlay
 import com.apache.mobile.ui.HomeScreen
 import com.apache.mobile.ui.MemoryScreen
 import com.apache.mobile.ui.ScheduleScreen
@@ -152,13 +157,17 @@ private fun ApacheMobileApp(share: SharedContent?, onShareConsumed: () -> Unit) 
     }
 
     // Micrófono: pide permiso la primera vez y luego empieza/para de escuchar.
+    var wantsConversation by remember { mutableStateOf(false) }
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) {
+        if (!granted) {
+            chat.notice = "Sin permiso del micrófono no puedo escucharte."
+        } else if (wantsConversation) {
+            chat.startConversation()
+        } else {
             section = Section.CHAT
             chat.toggleListening()
-        } else {
-            chat.notice = "Sin permiso del micrófono no puedo escucharte."
         }
+        wantsConversation = false
     }
     val onMic: () -> Unit = {
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
@@ -171,6 +180,19 @@ private fun ApacheMobileApp(share: SharedContent?, onShareConsumed: () -> Unit) 
         }
     }
 
+    // Conversación manos libres (como una llamada con Apache).
+    val onConversation: () -> Unit = {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            chat.startConversation()
+        } else {
+            wantsConversation = true
+            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+    BackHandler(enabled = chat.conversationMode) { chat.endConversation() }
+
     // Avisos cortos del chat (imagen guardada, errores de voz...).
     LaunchedEffect(chat.notice) {
         chat.notice?.let {
@@ -179,6 +201,7 @@ private fun ApacheMobileApp(share: SharedContent?, onShareConsumed: () -> Unit) 
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         containerColor = ApacheColors.background,
         snackbarHost = { SnackbarHost(snackbar) },
@@ -209,9 +232,10 @@ private fun ApacheMobileApp(share: SharedContent?, onShareConsumed: () -> Unit) 
                         chat = chat,
                         onOpenChat = { section = Section.CHAT },
                         onOpenSchedule = { section = Section.SCHEDULE },
-                        onMic = onMic
+                        onMic = onMic,
+                        onConversation = onConversation
                     )
-                    Section.CHAT -> ChatScreen(chat, onMic)
+                    Section.CHAT -> ChatScreen(chat, onMic, onConversation)
                     Section.SCHEDULE -> PlannerScreen(chat)
                     Section.MEMORY -> MemoryScreen(chat, onOpenChat = { section = Section.CHAT })
                     Section.SETTINGS -> SettingsScreen(onSaved = {
@@ -221,6 +245,12 @@ private fun ApacheMobileApp(share: SharedContent?, onShareConsumed: () -> Unit) 
                 }
             }
         }
+    }
+
+    // Modo conversación: encima de todo.
+    AnimatedVisibility(visible = chat.conversationMode, enter = fadeIn(), exit = fadeOut()) {
+        ConversationOverlay(chat)
+    }
     }
 }
 

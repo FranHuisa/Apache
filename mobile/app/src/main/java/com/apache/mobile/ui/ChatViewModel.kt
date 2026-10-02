@@ -55,11 +55,41 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private var conversationId: Long? = apache.settings.conversationId
     private var localIds = -1L
 
+    // --- Modo conversación (manos libres) ---
+
+    /** true mientras dura la conversación manos libres. */
+    var conversationMode by mutableStateOf(false)
+        private set
+
+    /** Lo último que se oyó y lo último que respondió Apache (para la pantalla de conversación). */
+    var lastHeard by mutableStateOf("")
+        private set
+    var lastAnswer by mutableStateOf("")
+        private set
+
+    /** true mientras Apache habla en el modo conversación. */
+    var isSpeaking by mutableStateOf(false)
+        private set
+
+    /** Silencios seguidos: con dos, se acaba la conversación sola. */
+    private var silences = 0
+
     val speechInput = SpeechInput(
         application,
-        onResult = { text -> send(text, fromVoice = true) },
-        onError = { notice = it },
-        onListeningChanged = { isListening = it }
+        onResult = { text -> onHeard(text) },
+        onError = { message ->
+            if (conversationMode) speakThenListen(message) else notice = message
+        },
+        onListeningChanged = { isListening = it },
+        onNothingHeard = {
+            if (!conversationMode) {
+                notice = "No te he entendido."
+            } else if (++silences >= 2) {
+                endConversation(say = "Te dejo, si necesitas algo me llamas.")
+            } else {
+                speechInput.start()
+            }
+        }
     )
 
     init {
@@ -109,12 +139,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 apache.settings.conversationId = reply.conversationId
                 messages = messages + local(reply.text, isUser = false, images = reply.images)
 
-                if (fromVoice && apache.settings.speakReplies) speaker.speak(reply.text)
+                if (conversationMode && fromVoice) {
+                    lastAnswer = reply.text
+                    speakThenListen(reply.text)
+                } else if (fromVoice && apache.settings.speakReplies) {
+                    speaker.speak(reply.text)
+                }
                 onReply?.invoke(reply.text)
             } catch (e: GeminiException) {
                 messages = messages + local(e.message ?: "Algo ha fallado.", isUser = false)
+                if (conversationMode) speakThenListen(e.message ?: "Algo ha fallado.")
             } catch (e: Exception) {
                 messages = messages + local("Algo ha fallado: ${e.message ?: e.javaClass.simpleName}", isUser = false)
+                if (conversationMode) speakThenListen("Algo ha fallado, prueba otra vez.")
             } finally {
                 isLoading = false
             }
@@ -211,13 +248,75 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // --- Voz ---
 
     fun toggleListening() {
+        if (conversationMode) {
+            endConversation()
+            return
+        }
         if (isListening) speechInput.stop() else {
             speaker.stop()
             speechInput.start()
         }
     }
 
+    /** Lo que se ha oído por el micrófono (pulsación normal o modo conversación). */
+    private fun onHeard(text: String) {
+        if (!conversationMode) {
+            send(text, fromVoice = true)
+            return
+        }
+        silences = 0
+        lastHeard = text
+        if (isGoodbye(text)) {
+            endConversation(say = "¡Hasta luego!")
+            return
+        }
+        lastAnswer = ""
+        send(text, fromVoice = true)
+    }
+
+    /**
+     * Empieza la conversación manos libres: Apache escucha, responde en voz
+     * alta y vuelve a escuchar solo, hasta que digas "para" o haya silencio.
+     */
+    fun startConversation() {
+        if (!apache.settings.isConfigured) {
+            notice = "Pon tu API key de Gemini en Ajustes para empezar."
+            return
+        }
+        speechInput.stop()
+        conversationMode = true
+        silences = 0
+        lastHeard = ""
+        lastAnswer = ""
+        speakThenListen("Dime.")
+    }
+
+    fun endConversation(say: String? = null) {
+        conversationMode = false
+        speechInput.stop()
+        speaker.stop()
+        isSpeaking = false
+        if (say != null) speaker.speak(say)
+    }
+
+    /** Habla y, al terminar, vuelve a escuchar (si sigue el modo conversación). */
+    private fun speakThenListen(text: String) {
+        if (!conversationMode) return
+        isSpeaking = true
+        speaker.speak(text) {
+            isSpeaking = false
+            if (conversationMode && !isLoading) speechInput.start()
+        }
+    }
+
+    private fun isGoodbye(text: String): Boolean {
+        val clean = text.lowercase().trim().trimEnd('.', '!')
+        return clean in setOf("para", "parar", "stop", "basta", "adiós", "adios", "hasta luego", "ya está", "ya esta", "nada más", "nada mas", "eso es todo", "gracias ya está", "gracias, ya está", "terminar", "salir") ||
+            clean.startsWith("gracias, ya") || clean.startsWith("gracias ya") || clean.endsWith("eso es todo")
+    }
+
     override fun onCleared() {
+        conversationMode = false
         speechInput.stop()
         speaker.shutdown()
     }

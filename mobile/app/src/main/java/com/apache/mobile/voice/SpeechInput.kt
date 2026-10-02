@@ -17,7 +17,9 @@ class SpeechInput(
     context: Context,
     private val onResult: (String) -> Unit,
     private val onError: (String) -> Unit,
-    private val onListeningChanged: (Boolean) -> Unit
+    private val onListeningChanged: (Boolean) -> Unit,
+    /** Silencio o no se entendió nada (el modo conversación lo trata aparte). */
+    private val onNothingHeard: () -> Unit = { onError("No te he entendido.") }
 ) {
 
     private val appContext = context.applicationContext
@@ -47,6 +49,10 @@ class SpeechInput(
 
             override fun onError(error: Int) {
                 onListeningChanged(false)
+                if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                    onNothingHeard()
+                    return
+                }
                 val message = when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No te he entendido."
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Falta el permiso del micrófono."
@@ -59,7 +65,7 @@ class SpeechInput(
             override fun onResults(results: Bundle?) {
                 onListeningChanged(false)
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                if (text.isNullOrBlank()) onError("No te he entendido.") else onResult(text)
+                if (text.isNullOrBlank()) onNothingHeard() else onResult(text)
             }
         })
 
