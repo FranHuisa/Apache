@@ -46,6 +46,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /** Texto para la caja de escribir (lo rellena "Compartir con Apache"). */
     var draft by mutableStateOf("")
 
+    /** Sube cuando se concede el permiso de ubicación (Inicio vuelve a mirar el tiempo). */
+    var locationVersion by mutableStateOf(0)
+
     /** Sube cada vez que llega algo compartido desde otra app (para abrir el chat). */
     var shareCount by mutableStateOf(0)
 

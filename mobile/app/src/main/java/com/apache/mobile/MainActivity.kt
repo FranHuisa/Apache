@@ -128,7 +128,10 @@ private fun ApacheMobileApp(share: SharedContent?, onShareConsumed: () -> Unit) 
     // Permisos al empezar: avisos (Android 13+) y ubicación (para el tiempo y "cerca de mí").
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         if (granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true || granted[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
-            scope.launch { DeviceLocation.current() }
+            scope.launch {
+                DeviceLocation.current()
+                chat.locationVersion++
+            }
         }
     }
     LaunchedEffect(Unit) {

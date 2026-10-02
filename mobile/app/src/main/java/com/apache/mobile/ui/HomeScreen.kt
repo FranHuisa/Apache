@@ -100,8 +100,16 @@ fun HomeScreen(chat: ChatViewModel, onOpenChat: () -> Unit, onOpenSchedule: () -
         upcoming = data.upcoming
         reminders = data.reminders
         lists = data.lists
-        // Con ciudad guardada, esa; si no, donde está el móvil.
-        weather = WeatherService.current(data.city)
+    }
+
+    // El tiempo: con ciudad guardada, esa; si no, donde está el móvil. Se repite
+    // al conceder el permiso de ubicación.
+    LaunchedEffect(chat.locationVersion) {
+        weatherLoading = true
+        val savedCity = withContext(Dispatchers.IO) {
+            (app.memory.findByKey("ciudad") ?: app.memory.findByKey("ubicación") ?: app.memory.findByKey("ubicacion"))?.value
+        }
+        weather = WeatherService.current(savedCity) ?: weather
         weatherLoading = false
     }
 
