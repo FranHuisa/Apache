@@ -1,16 +1,25 @@
 package com.apache.mobile
 
 import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -26,12 +35,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.apache.mobile.ui.ApacheColors
 import com.apache.mobile.ui.ApacheTheme
 import com.apache.mobile.ui.ChatScreen
 import com.apache.mobile.ui.ChatViewModel
+import com.apache.mobile.ui.HomeScreen
 import com.apache.mobile.ui.MemoryScreen
 import com.apache.mobile.ui.ScheduleScreen
 import com.apache.mobile.ui.SettingsScreen
@@ -49,20 +63,22 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Section(val label: String, val icon: String) {
-    CHAT("Chat", "💬"),
-    SCHEDULE("Horario", "📅"),
-    MEMORY("Memoria", "🧠"),
-    SETTINGS("Ajustes", "⚙️")
+private enum class Section(val label: String, val icon: ImageVector) {
+    HOME("Inicio", Icons.Filled.Home),
+    CHAT("Chat", Icons.Filled.Chat),
+    SCHEDULE("Horario", Icons.Filled.CalendarMonth),
+    MEMORY("Memoria", Icons.Filled.Psychology),
+    SETTINGS("Ajustes", Icons.Filled.Settings)
 }
 
 @Composable
 private fun ApacheMobileApp() {
     val chat: ChatViewModel = viewModel()
     val settings = ApacheApp.get().settings
+    val context = LocalContext.current
 
     // Sin API key, se empieza en Ajustes.
-    var section by rememberSaveable { mutableStateOf(if (settings.isConfigured) Section.CHAT else Section.SETTINGS) }
+    var section by rememberSaveable { mutableStateOf(if (settings.isConfigured) Section.HOME else Section.SETTINGS) }
     val snackbar = remember { SnackbarHostState() }
 
     // Android 13+: permiso para los avisos de recordatorios y del horario.
@@ -72,6 +88,26 @@ private fun ApacheMobileApp() {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         chat.dailySummaryIfNeeded()
+    }
+
+    // Micrófono: pide permiso la primera vez y luego empieza/para de escuchar.
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            section = Section.CHAT
+            chat.toggleListening()
+        } else {
+            chat.notice = "Sin permiso del micrófono no puedo escucharte."
+        }
+    }
+    val onMic: () -> Unit = {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            if (!chat.isListening) section = Section.CHAT
+            chat.toggleListening()
+        } else {
+            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
     }
 
     // Avisos cortos del chat (imagen guardada, errores de voz...).
@@ -91,11 +127,14 @@ private fun ApacheMobileApp() {
                     NavigationBarItem(
                         selected = section == item,
                         onClick = { section = item },
-                        icon = { Text(item.icon, fontSize = 20.sp) },
-                        label = { Text(item.label) },
+                        icon = { Icon(item.icon, contentDescription = item.label) },
+                        label = { Text(item.label, fontSize = 11.sp) },
                         colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color.Black,
                             selectedTextColor = ApacheColors.accent,
-                            indicatorColor = ApacheColors.card
+                            indicatorColor = ApacheColors.accent,
+                            unselectedIconColor = ApacheColors.textMuted,
+                            unselectedTextColor = ApacheColors.textMuted
                         )
                     )
                 }
@@ -103,13 +142,22 @@ private fun ApacheMobileApp() {
         }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding).imePadding()) {
-            when (section) {
-                Section.CHAT -> ChatScreen(chat)
-                Section.SCHEDULE -> ScheduleScreen(chat)
-                Section.MEMORY -> MemoryScreen(chat, onOpenChat = { section = Section.CHAT })
-                Section.SETTINGS -> SettingsScreen(onSaved = {
-                    chat.dailySummaryIfNeeded()
-                })
+            Crossfade(targetState = section, label = "section") { current ->
+                when (current) {
+                    Section.HOME -> HomeScreen(
+                        chat = chat,
+                        onOpenChat = { section = Section.CHAT },
+                        onOpenSchedule = { section = Section.SCHEDULE },
+                        onMic = onMic
+                    )
+                    Section.CHAT -> ChatScreen(chat, onMic)
+                    Section.SCHEDULE -> ScheduleScreen(chat)
+                    Section.MEMORY -> MemoryScreen(chat, onOpenChat = { section = Section.CHAT })
+                    Section.SETTINGS -> SettingsScreen(onSaved = {
+                        chat.dailySummaryIfNeeded()
+                        section = Section.HOME
+                    })
+                }
             }
         }
     }

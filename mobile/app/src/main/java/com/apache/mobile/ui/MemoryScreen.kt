@@ -1,6 +1,37 @@
 package com.apache.mobile.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddComment
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Work
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.apache.mobile.ui.components.ApacheGradient
+import com.apache.mobile.ui.components.SuggestionPill
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,14 +44,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -44,7 +71,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Memoria: lo que Apache sabe de ti (editable) y las conversaciones pasadas. */
+/**
+ * Memoria: lo que Apache sabe de ti, en tarjetas por categoría que se
+ * despliegan al tocarlas, y las conversaciones pasadas.
+ */
 @Composable
 fun MemoryScreen(chat: ChatViewModel, onOpenChat: () -> Unit) {
     val app = ApacheApp.get()
@@ -56,6 +86,8 @@ fun MemoryScreen(chat: ChatViewModel, onOpenChat: () -> Unit) {
     var editing by remember { mutableStateOf<MemoryFact?>(null) }
     var creating by remember { mutableStateOf(false) }
     var reloadKey by remember { mutableStateOf(0) }
+    var query by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(setOf("personal")) }
 
     LaunchedEffect(reloadKey) {
         val (loadedFacts, loadedConversations) = withContext(Dispatchers.IO) { app.memory.all() to app.conversations.list() }
@@ -63,92 +95,162 @@ fun MemoryScreen(chat: ChatViewModel, onOpenChat: () -> Unit) {
         conversations = loadedConversations
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Text("Memoria", color = Color.White, fontSize = 24.sp, modifier = Modifier.padding(start = 16.dp, top = 12.dp))
+    val visibleFacts = if (query.isBlank()) facts else facts.filter {
+        it.key.contains(query, ignoreCase = true) || it.value.contains(query, ignoreCase = true)
+    }
 
-        TabRow(selectedTabIndex = tab, containerColor = ApacheColors.background, contentColor = ApacheColors.accent) {
-            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Lo que sabe de ti") })
-            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Conversaciones") })
-        }
-
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            item { Spacer(modifier = Modifier.height(4.dp)) }
-
-            if (tab == 0) {
-                item {
-                    Button(
-                        onClick = { creating = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = ApacheColors.accent, contentColor = Color.Black)
-                    ) { Text("+ Añadir dato") }
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.Psychology, contentDescription = null, tint = ApacheColors.accent, modifier = Modifier.size(30.dp))
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text("Memoria", color = Color.White, fontSize = 24.sp)
+                    Text(
+                        "${facts.size} datos · ${conversations.size} conversaciones",
+                        color = ApacheColors.textMuted, fontSize = 13.sp
+                    )
                 }
+            }
 
-                if (facts.isEmpty()) {
-                    item {
-                        Text(
-                            "Apache todavía no recuerda nada de ti. Díselo en el chat («recuerda que vivo en Madrid») o añádelo aquí.",
-                            color = ApacheColors.textMuted, fontSize = 14.sp
-                        )
-                    }
-                }
+            Spacer(modifier = Modifier.height(12.dp))
 
-                MemoryStore.TYPES.forEach { type ->
-                    val group = facts.filter { (if (it.type in MemoryStore.TYPES) it.type else "otro") == type }
-                    if (group.isNotEmpty()) {
-                        item(key = "h$type") {
-                            Text(MemoryStore.typeLabel(type), color = ApacheColors.accent, fontSize = 15.sp, modifier = Modifier.padding(top = 6.dp))
-                        }
-                        items(group, key = { "f${it.id}" }) { fact ->
-                            Surface(
-                                color = ApacheColors.cardAlt,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth().clickable { editing = fact }
-                            ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Text(fact.key, color = ApacheColors.textMuted, fontSize = 12.sp)
-                                    Text(fact.value, color = Color.White, fontSize = 15.sp)
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                item {
-                    Button(
-                        onClick = { chat.newConversation(); onOpenChat() },
-                        colors = ButtonDefaults.buttonColors(containerColor = ApacheColors.accent, contentColor = Color.Black)
-                    ) { Text("+ Nueva conversación") }
-                }
-
-                items(conversations, key = { "c${it.id}" }) { conversation ->
-                    Surface(
-                        color = ApacheColors.cardAlt,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            chat.openConversation(conversation.id)
-                            onOpenChat()
-                        }
+            // Selector de pestaña tipo "pastilla".
+            Row(
+                modifier = Modifier.padding(horizontal = 18.dp).fillMaxWidth()
+                    .clip(RoundedCornerShape(50)).background(ApacheColors.surface).padding(4.dp)
+            ) {
+                listOf("Lo que sabe de ti", "Conversaciones").forEachIndexed { index, label ->
+                    val selected = tab == index
+                    val bg by animateColorAsState(if (selected) ApacheColors.accent else Color.Transparent, label = "tab$index")
+                    Box(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(50)).background(bg)
+                            .clickable { tab = index }.padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(conversation.title, color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text(conversation.updatedAt.replace('T', ' ').take(16), color = ApacheColors.textFaint, fontSize = 12.sp)
-                            }
-                            TextButton(onClick = {
-                                scope.launch {
-                                    withContext(Dispatchers.IO) { app.conversations.delete(conversation.id) }
-                                    if (app.settings.conversationId == conversation.id) chat.newConversation()
-                                    reloadKey++
-                                }
-                            }) { Text("Borrar", color = ApacheColors.danger, fontSize = 13.sp) }
-                        }
+                        Text(label, color = if (selected) Color.Black else ApacheColors.textMuted, fontSize = 14.sp)
                     }
                 }
             }
 
-            item { Spacer(modifier = Modifier.height(16.dp)) }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                item { Spacer(modifier = Modifier.height(4.dp)) }
+
+                if (tab == 0) {
+                    item {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            placeholder = { Text("Buscar en tu memoria") },
+                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(50),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    if (facts.isEmpty()) {
+                        item {
+                            Surface(color = ApacheColors.card, shape = RoundedCornerShape(20.dp)) {
+                                Column(modifier = Modifier.padding(18.dp)) {
+                                    Text("Apache todavía no recuerda nada de ti", color = Color.White, fontSize = 16.sp)
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        "Díselo en el chat («recuerda que vivo en Madrid») o pulsa + para añadirlo tú.",
+                                        color = ApacheColors.textMuted, fontSize = 14.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    SuggestionPill("Recuerda que me llamo…") {
+                                        onOpenChat()
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    MemoryStore.TYPES.forEach { type ->
+                        val group = visibleFacts.filter { (if (it.type in MemoryStore.TYPES) it.type else "otro") == type }
+                        if (group.isNotEmpty()) {
+                            item(key = "cat$type") {
+                                CategoryCard(
+                                    type = type,
+                                    facts = group,
+                                    open = query.isNotBlank() || type in expanded,
+                                    onToggle = { expanded = if (type in expanded) expanded - type else expanded + type },
+                                    onEdit = { editing = it }
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(18.dp),
+                            color = Color.Transparent,
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(ApacheGradient)
+                                .clickable { chat.newConversation(); onOpenChat() }
+                        ) {
+                            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.AddComment, contentDescription = null, tint = Color.Black)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text("Nueva conversación", color = Color.Black, fontSize = 15.sp)
+                            }
+                        }
+                    }
+
+                    if (conversations.isEmpty()) {
+                        item { Text("Aún no hay conversaciones guardadas.", color = ApacheColors.textMuted, fontSize = 14.sp) }
+                    }
+
+                    items(conversations, key = { "c${it.id}" }) { conversation ->
+                        Surface(
+                            color = ApacheColors.cardAlt,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable {
+                                chat.openConversation(conversation.id)
+                                onOpenChat()
+                            }
+                        ) {
+                            Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.ChatBubbleOutline, contentDescription = null, tint = ApacheColors.accent, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(conversation.title, color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(conversation.updatedAt.replace('T', ' ').take(16), color = ApacheColors.textFaint, fontSize = 12.sp)
+                                }
+                                IconButton(onClick = {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) { app.conversations.delete(conversation.id) }
+                                        if (app.settings.conversationId == conversation.id) chat.newConversation()
+                                        reloadKey++
+                                    }
+                                }) {
+                                    Icon(Icons.Filled.DeleteOutline, contentDescription = "Borrar", tint = ApacheColors.danger)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item { Spacer(modifier = Modifier.height(90.dp)) }
+            }
+        }
+
+        if (tab == 0) {
+            FloatingActionButton(
+                onClick = { creating = true },
+                containerColor = ApacheColors.accent,
+                contentColor = Color.Black,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(18.dp)
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "Añadir dato")
+            }
         }
     }
 
@@ -158,6 +260,78 @@ fun MemoryScreen(chat: ChatViewModel, onOpenChat: () -> Unit) {
             onDismiss = { creating = false; editing = null },
             onChanged = { creating = false; editing = null; reloadKey++ }
         )
+    }
+}
+
+private fun typeIcon(type: String): ImageVector = when (type) {
+    "personal" -> Icons.Filled.Person
+    "preferencia" -> Icons.Filled.Favorite
+    "rutina" -> Icons.Filled.Repeat
+    "trabajo" -> Icons.Filled.Work
+    "salud" -> Icons.Filled.FavoriteBorder
+    else -> Icons.Filled.Lightbulb
+}
+
+/** Tarjeta de una categoría: cabecera con icono y número; al tocarla se despliega. */
+@Composable
+private fun CategoryCard(
+    type: String,
+    facts: List<MemoryFact>,
+    open: Boolean,
+    onToggle: () -> Unit,
+    onEdit: (MemoryFact) -> Unit
+) {
+    val rotation by animateFloatAsState(if (open) 180f else 0f, label = "chevron$type")
+
+    Surface(
+        color = ApacheColors.card,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().animateContentSize()
+    ) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier.size(38.dp).clip(CircleShape).background(ApacheGradient),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(typeIcon(type), contentDescription = null, tint = Color.Black, modifier = Modifier.size(20.dp))
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(MemoryStore.typeLabel(type), color = Color.White, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                Surface(color = ApacheColors.cardAlt, shape = RoundedCornerShape(50)) {
+                    Text(
+                        "${facts.size}", color = ApacheColors.accentLight, fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                    )
+                }
+                Icon(
+                    Icons.Filled.ExpandMore, contentDescription = null, tint = ApacheColors.textMuted,
+                    modifier = Modifier.rotate(rotation)
+                )
+            }
+
+            if (open) {
+                Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
+                    facts.forEach { fact ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                                .clip(RoundedCornerShape(12.dp)).background(ApacheColors.cardAlt)
+                                .clickable { onEdit(fact) }.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(fact.key, color = ApacheColors.accentSoft, fontSize = 12.sp)
+                                Text(fact.value, color = Color.White, fontSize = 15.sp)
+                            }
+                            Icon(Icons.Filled.Edit, contentDescription = "Editar", tint = ApacheColors.textFaint, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
