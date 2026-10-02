@@ -1,41 +1,41 @@
 package com.apache.tools
 
+import com.apache.ApacheDefaults
+import com.apache.database.service.UserMemoryService
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Duration
+import java.time.LocalDate
+import java.time.format.TextStyle
+import java.util.Locale
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.springframework.stereotype.Component
 
 /**
- * Tool de solo lectura que consulta el tiempo (actual y/o previsión) de una
- * localización cualquiera.
+ * Tool de solo lectura que consulta el tiempo (actual y previsión).
  *
- * Usa la API pública de Open-Meteo (https://open-meteo.com) porque no
- * requiere API key: para un prototipo evita tener que gestionar credenciales
- * y variables de entorno adicionales (a diferencia de Gemini, ver
- * application.yml). Si en el futuro se necesita más precisión/cobertura, se
- * puede sustituir por otro proveedor (AEMET, OpenWeather, etc.) sin tocar el
- * contrato de la tool: solo cambiaría la implementación de [fetchForecast] y
- * [geocode].
- *
- * El flujo es en dos pasos, como exige Open-Meteo:
- * 1. Geocoding: convierte el nombre de la localización ("Madrid", "Almería")
- *    en coordenadas (lat/lon) mediante su API de geocoding.
- * 2. Forecast: con esas coordenadas, pide el tiempo actual y, si se solicita,
- *    la previsión diaria de los próximos días.
+ * Fallaba mucho porque buscaba el texto tal cual ("Madrid, España" no da
+ * resultados) y se quedaba con el primero (Córdoba de Argentina). Ahora:
+ * - [GeoLookup] limpia el nombre, prueba variantes y elige bien el sitio
+ *   (la provincia/país si se indica; si no, mejor uno de España).
+ * - Cada petición se reintenta una vez y los timeouts son más largos.
+ * - Si Open-Meteo falla, se usa wttr.in como respaldo.
+ * - Sin ciudad, usa la de la memoria del usuario.
  */
 @Component
-class GetWeatherTool : Tool {
+class GetWeatherTool(
+    private val memoryService: UserMemoryService
+) : Tool {
 
     override val name = "getWeather"
 
     override val description =
-        "Consulta el tiempo actual de una ciudad/localización y, opcionalmente, la previsión " +
-            "meteorológica de los próximos días. Útil cuando el usuario pregunta qué tiempo hace, " +
-            "si va a llover, la temperatura, o cómo estará el tiempo mañana o en los próximos días."
+        "Consulta el tiempo: ahora, hoy, mañana o los próximos días (temperatura, lluvia, viento). " +
+            "Úsala siempre que pregunten por el tiempo, la lluvia, si hace frío o si llevar paraguas. " +
+            "Si el usuario no dice la ciudad, déjala vacía y se usará la de su memoria."
 
     override val riskLevel = RiskLevel.READ_ONLY
 
@@ -44,208 +44,189 @@ class GetWeatherTool : Tool {
         "properties" to mapOf(
             "location" to mapOf(
                 "type" to "string",
-                "description" to "Ciudad o localización a consultar, ej: 'Madrid', 'Almería', 'Nueva York'."
+                "description" to "Ciudad o pueblo, con provincia o país si hay duda, ej: 'Córdoba', " +
+                    "'Mérida, Badajoz'. Vacío = la ciudad del usuario."
             ),
             "days" to mapOf(
                 "type" to "integer",
-                "description" to
-                    "Número de días de previsión a futuro, incluyendo hoy. 1 = solo el tiempo actual " +
-                        "de hoy. Hasta 7 días. Si no se especifica, se asume 1 (solo el tiempo actual)."
+                "description" to "Días de previsión incluyendo hoy (1-7). Por defecto 2 (hoy y mañana)."
             )
-        ),
-        "required" to listOf("location")
+        )
     )
 
-    private val http = OkHttpClient.Builder().callTimeout(Duration.ofSeconds(10)).build()
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(Duration.ofSeconds(10))
+        .readTimeout(Duration.ofSeconds(15))
+        .callTimeout(Duration.ofSeconds(20))
+        .build()
     private val mapper = ObjectMapper()
+    private val es = Locale.forLanguageTag("es-ES")
+
+    private data class Day(val date: LocalDate, val code: Int, val min: Double, val max: Double, val rain: Int?)
+
+    private data class Report(
+        val place: String,
+        val temperature: Double,
+        val feelsLike: Double?,
+        val humidity: Int?,
+        val wind: Double?,
+        val description: String,
+        val days: List<Day>,
+        val source: String
+    )
 
     override fun execute(args: Map<String, Any?>): String {
-        val location = (args["location"] as? String)?.trim()
-            ?: return "No se ha especificado ninguna localización."
+        val location = (args["location"] as? String)?.trim()?.ifBlank { null } ?: homeCity()
+            ?: return "No sé de qué ciudad. Pregúntale al usuario dónde vive y guárdalo con rememberFact (clave 'ciudad')."
 
-        if (location.isBlank()) {
-            return "No se ha especificado ninguna localización."
-        }
+        val days = ((args["days"] as? Number)?.toInt() ?: (args["days"] as? String)?.toIntOrNull() ?: 2).coerceIn(1, 7)
 
-        // Gemini puede mandar "days" como Int, Double o String según cómo lo serialice; lo
-        // normalizamos aceptando cualquiera de esas formas y lo acotamos a un rango razonable.
-        val requestedDays = (args["days"] as? Number)?.toInt()
-            ?: (args["days"] as? String)?.toIntOrNull()
-            ?: 1
-        val days = requestedDays.coerceIn(1, 7)
+        val report = runCatching { openMeteo(location, days) }.getOrNull()
+            ?: runCatching { wttr(location, days) }.getOrNull()
+            ?: return "No he podido consultar el tiempo de '$location' (no encuentro el sitio o no hay conexión). " +
+                "Si el nombre es raro, pide al usuario la provincia o una ciudad cercana."
 
-        val place = try {
-            geocode(location)
-        } catch (e: Exception) {
-            return "No he podido buscar la localización '$location': ${e.message}"
-        } ?: return "No he encontrado ninguna localización llamada '$location'."
-
-        val forecast = try {
-            fetchForecast(place.latitude, place.longitude, days)
-        } catch (e: Exception) {
-            return "No he podido obtener el tiempo para ${place.displayName}: ${e.message}"
-        }
-
-        return formatResponse(place, forecast, days)
+        return format(report, days)
     }
 
-    // --- Geocoding ---------------------------------------------------------
+    private fun homeCity(): String? = runCatching {
+        val facts = memoryService.list(ApacheDefaults.DEFAULT_USER_ID)
+        listOf("ciudad", "ubicación", "ubicacion", "vivo en", "localidad", "pueblo").firstNotNullOfOrNull { key ->
+            facts.firstOrNull { it.key.equals(key, ignoreCase = true) }?.value?.takeIf(String::isNotBlank)
+        }
+    }.getOrNull()
 
-    private data class Place(
-        val displayName: String,
-        val latitude: Double,
-        val longitude: Double
-    )
+    // --- Open-Meteo ----------------------------------------------------------
 
-    private fun geocode(location: String): Place? {
-        val encoded = URLEncoder.encode(location, StandardCharsets.UTF_8)
-        val url = "https://geocoding-api.open-meteo.com/v1/search?name=$encoded&count=1&language=es"
+    private fun openMeteo(query: String, days: Int): Report? {
+        var candidates = emptyList<GeoCandidate>()
+        for (term in GeoLookup.searchTerms(query)) {
+            val results = get(
+                "https://geocoding-api.open-meteo.com/v1/search?name=${encode(term)}&count=10&language=es&format=json"
+            )["results"]
+            if (results == null || !results.isArray || results.isEmpty) continue
+            candidates = results.map { r ->
+                GeoCandidate(
+                    r.text("name"), r.text("admin1"), r.text("admin2"), r.text("country"), r.text("country_code"),
+                    r["population"]?.asLong() ?: 0L, r["latitude"].asDouble(), r["longitude"].asDouble()
+                )
+            }
+            break
+        }
+        val place = GeoLookup.choose(candidates, query) ?: return null
 
-        val json = get(url)
-        val results = json["results"] ?: return null
-        if (!results.isArray || results.isEmpty) return null
-
-        val first = results[0]
-        val name = first["name"]?.asText() ?: location
-        val admin = first["admin1"]?.asText()
-        val country = first["country"]?.asText()
-
-        val displayName = listOfNotNull(name, admin, country).distinct().joinToString(", ")
-
-        return Place(
-            displayName = displayName,
-            latitude = first["latitude"].asDouble(),
-            longitude = first["longitude"].asDouble()
+        val json = get(
+            "https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}" +
+                "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day" +
+                "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+                "&forecast_days=${days.coerceIn(2, 7)}&timezone=auto"
         )
-    }
-
-    // --- Forecast ------------------------------------------------------------
-
-    private data class DailyForecast(
-        val date: String,
-        val weatherCode: Int,
-        val tempMax: Double,
-        val tempMin: Double,
-        val precipitationProbability: Int?
-    )
-
-    private data class Forecast(
-        val currentTemperature: Double,
-        val currentWeatherCode: Int,
-        val currentWindSpeed: Double,
-        val daily: List<DailyForecast>
-    )
-
-    private fun fetchForecast(latitude: Double, longitude: Double, days: Int): Forecast {
-        val url = "https://api.open-meteo.com/v1/forecast" +
-            "?latitude=$latitude&longitude=$longitude" +
-            "&current_weather=true" +
-            "&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
-            "&forecast_days=$days" +
-            "&timezone=auto"
-
-        val json = get(url)
-
-        val current = json["current_weather"]
+        val current = json["current"]
         val daily = json["daily"]
-
         val dates = daily["time"].map { it.asText() }
-        val codes = daily["weathercode"].map { it.asInt() }
-        val maxTemps = daily["temperature_2m_max"].map { it.asDouble() }
-        val minTemps = daily["temperature_2m_min"].map { it.asDouble() }
-        val precipitationProbabilities = daily["precipitation_probability_max"]?.map { it.asInt() }
-
-        val dailyForecasts = dates.indices.map { i ->
-            DailyForecast(
-                date = dates[i],
-                weatherCode = codes.getOrElse(i) { -1 },
-                tempMax = maxTemps.getOrElse(i) { Double.NaN },
-                tempMin = minTemps.getOrElse(i) { Double.NaN },
-                precipitationProbability = precipitationProbabilities?.getOrNull(i)
+        val list = dates.indices.map { i ->
+            Day(
+                LocalDate.parse(dates[i]),
+                daily["weather_code"]?.get(i)?.asInt(-1) ?: -1,
+                daily["temperature_2m_min"]?.get(i)?.asDouble(Double.NaN) ?: Double.NaN,
+                daily["temperature_2m_max"]?.get(i)?.asDouble(Double.NaN) ?: Double.NaN,
+                daily["precipitation_probability_max"]?.get(i)?.takeUnless { it.isNull }?.asInt()
             )
         }
-
-        return Forecast(
-            currentTemperature = current["temperature"].asDouble(),
-            currentWeatherCode = current["weathercode"].asInt(),
-            currentWindSpeed = current["windspeed"].asDouble(),
-            daily = dailyForecasts
+        val code = current["weather_code"]?.asInt(-1) ?: -1
+        return Report(
+            place = place.displayName,
+            temperature = current["temperature_2m"].asDouble(),
+            feelsLike = current["apparent_temperature"]?.asDouble(),
+            humidity = current["relative_humidity_2m"]?.asInt(),
+            wind = current["wind_speed_10m"]?.asDouble(),
+            description = GeoLookup.describe(code, (current["is_day"]?.asInt(1) ?: 1) == 1).first,
+            days = list,
+            source = "Open-Meteo"
         )
     }
 
-    private fun get(url: String): JsonNode {
-        val request = Request.Builder().url(url).build()
+    // --- Respaldo: wttr.in ---------------------------------------------------
 
-        http.newCall(request).execute().use { response ->
-            val bodyText = response.body?.string().orEmpty()
-
-            if (!response.isSuccessful) {
-                throw IllegalStateException("Error ${response.code} llamando a la API del tiempo.")
-            }
-
-            return mapper.readTree(bodyText)
-        }
-    }
-
-    // --- Presentación --------------------------------------------------------
-
-    /**
-     * Construye un texto claro y resumido para que Gemini lo use al componer su respuesta
-     * final al usuario. No se le devuelve el JSON crudo: Gemini funciona mejor (y consume
-     * menos tokens) con un resumen ya legible en lenguaje natural.
-     */
-    private fun formatResponse(place: Place, forecast: Forecast, days: Int): String {
-        return buildString {
-            appendLine("Tiempo en ${place.displayName}:")
-            appendLine(
-                "Ahora mismo: ${describeWeatherCode(forecast.currentWeatherCode)}, " +
-                    "${formatTemp(forecast.currentTemperature)} · " +
-                    "viento ${formatNumber(forecast.currentWindSpeed)} km/h."
+    private fun wttr(query: String, days: Int): Report {
+        val (name, hint) = GeoLookup.split(query)
+        val term = listOf(name, hint).filter { it.isNotBlank() }.joinToString(",")
+        val json = get("https://wttr.in/${encode(term).replace("+", "%20")}?format=j1&lang=es")
+        val now = json["current_condition"][0]
+        val area = json["nearest_area"]?.get(0)
+        val areaName = area?.get("areaName")?.get(0)?.text("value").orEmpty()
+        val country = area?.get("country")?.get(0)?.text("value").orEmpty()
+        val description = (now["lang_es"]?.get(0)?.text("value")?.ifBlank { null }
+            ?: now["weatherDesc"]?.get(0)?.text("value").orEmpty()).lowercase(es)
+        val list = (json["weather"]?.toList() ?: emptyList()).take(days.coerceIn(2, 3)).map { day ->
+            val rain = day["hourly"]?.maxOfOrNull { it.text("chanceofrain").toIntOrNull() ?: 0 }
+            Day(
+                LocalDate.parse(day.text("date")), -1,
+                day.text("mintempC").toDoubleOrNull() ?: Double.NaN,
+                day.text("maxtempC").toDoubleOrNull() ?: Double.NaN,
+                rain
             )
-
-            if (days > 1 && forecast.daily.isNotEmpty()) {
-                appendLine()
-                appendLine("Previsión próximos días:")
-                forecast.daily.forEach { day ->
-                    val precipitationText = day.precipitationProbability
-                        ?.let { " · prob. lluvia $it%" }
-                        ?: ""
-
-                    appendLine(
-                        "- ${day.date}: ${describeWeatherCode(day.weatherCode)}, " +
-                            "min ${formatTemp(day.tempMin)} / máx ${formatTemp(day.tempMax)}$precipitationText"
-                    )
-                }
-            }
-        }.trim()
+        }
+        return Report(
+            place = listOf(areaName.ifBlank { name }, country).filter { it.isNotBlank() }.joinToString(", "),
+            temperature = now.text("temp_C").toDouble(),
+            feelsLike = now.text("FeelsLikeC").toDoubleOrNull(),
+            humidity = now.text("humidity").toIntOrNull(),
+            wind = now.text("windspeedKmph").toDoubleOrNull(),
+            description = description.ifBlank { "variable" },
+            days = list,
+            source = "wttr.in"
+        )
     }
 
-    private fun formatTemp(value: Double) = "${formatNumber(value)}°C"
+    // --- Utilidades ------------------------------------------------------------
 
-    private fun formatNumber(value: Double): String =
-        if (value.isNaN()) "N/D" else if (value % 1.0 == 0.0) value.toInt().toString() else "%.1f".format(value)
+    private fun JsonNode.text(field: String): String = this[field]?.asText().orEmpty()
 
-    /**
-     * Traduce los códigos de tiempo estándar WMO (los que usa Open-Meteo) a una descripción
-     * corta en español. La tabla completa está documentada en:
-     * https://open-meteo.com/en/docs -> "WMO Weather interpretation codes"
-     */
-    private fun describeWeatherCode(code: Int): String = when (code) {
-        0 -> "cielo despejado"
-        1 -> "mayormente despejado"
-        2 -> "parcialmente nublado"
-        3 -> "nublado"
-        45, 48 -> "niebla"
-        51, 53, 55 -> "llovizna"
-        56, 57 -> "llovizna helada"
-        61, 63, 65 -> "lluvia"
-        66, 67 -> "lluvia helada"
-        71, 73, 75 -> "nieve"
-        77 -> "granos de nieve"
-        80, 81, 82 -> "chubascos"
-        85, 86 -> "chubascos de nieve"
-        95 -> "tormenta"
-        96, 99 -> "tormenta con granizo"
-        else -> "condiciones desconocidas"
+    private fun encode(text: String) = URLEncoder.encode(text, StandardCharsets.UTF_8)
+
+    /** GET con un reintento. */
+    private fun get(url: String): JsonNode {
+        var last: Exception? = null
+        repeat(2) { attempt ->
+            try {
+                val request = Request.Builder().url(url).header("User-Agent", "Apache/0.2 (asistente personal)").build()
+                http.newCall(request).execute().use { response ->
+                    val body = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) throw IllegalStateException("Error ${response.code} de la API del tiempo.")
+                    return mapper.readTree(body)
+                }
+            } catch (e: Exception) {
+                last = e
+                if (attempt == 0) Thread.sleep(800)
+            }
+        }
+        throw last ?: IllegalStateException("Sin respuesta")
+    }
+
+    /** Texto para Gemini. Siempre incluye hoy y mañana. */
+    private fun format(report: Report, days: Int): String = buildString {
+        fun t(value: Double) = if (value.isNaN()) "N/D" else "${Math.round(value)} °C"
+        appendLine("Tiempo en ${report.place}:")
+        append("Ahora: ${report.description}, ${t(report.temperature)}")
+        report.feelsLike?.let { if (Math.round(it) != Math.round(report.temperature)) append(" (sensación ${t(it)})") }
+        report.humidity?.let { append(", humedad $it%") }
+        report.wind?.let { append(", viento ${Math.round(it)} km/h") }
+        appendLine(".")
+        val today = LocalDate.now()
+        report.days.take(maxOf(days, 2)).forEach { day ->
+            val label = when (day.date) {
+                today -> "Hoy"
+                today.plusDays(1) -> "Mañana"
+                else -> day.date.dayOfWeek.getDisplayName(TextStyle.FULL, es).replaceFirstChar { it.titlecase(es) } +
+                    " ${day.date.dayOfMonth}"
+            }
+            append("- $label: ")
+            if (day.code >= 0) append("${GeoLookup.describe(day.code).first}, ")
+            append("mín ${t(day.min)} / máx ${t(day.max)}")
+            day.rain?.let { append(", lluvia $it%") }
+            appendLine()
+        }
+        append("(Fuente: ${report.source})")
     }
 }

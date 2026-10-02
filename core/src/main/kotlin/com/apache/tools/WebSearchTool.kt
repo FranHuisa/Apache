@@ -28,10 +28,10 @@ class WebSearchTool(
     override val name = "webSearch"
 
     override val description =
-        "Busca información actual en internet (Google). Úsalo para noticias, resultados " +
+        "Busca información actual en internet (Google). Úsalo para resultados " +
             "deportivos, precios, horarios, estrenos, datos que cambian con el tiempo o cualquier " +
             "cosa que no sepas con seguridad o que pueda haber cambiado recientemente. No lo uses " +
-            "para el tiempo (usa getWeather) ni para cosas del ordenador del usuario."
+            "para el tiempo (usa getWeather), ni para titulares (usa getNews), ni para cosas del ordenador del usuario."
 
     override val riskLevel = RiskLevel.READ_ONLY
 

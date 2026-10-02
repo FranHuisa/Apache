@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Icon
@@ -204,6 +205,8 @@ fun HomeScreen(chat: ChatViewModel, onOpenChat: () -> Unit, onOpenSchedule: () -
         val actions = listOf(
             QuickAction("¿Qué tengo hoy?", Icons.Filled.CalendarMonth, "¿Qué tengo hoy?"),
             QuickAction("Organiza mi día", Icons.Filled.AutoAwesome, "Organízame el día de hoy"),
+            QuickAction("Noticias de hoy", Icons.Filled.Newspaper, "¿Cuáles son las noticias de hoy?"),
+            QuickAction("¿Qué tiempo hace?", Icons.Filled.WbSunny, "¿Qué tiempo hace hoy y mañana?"),
             QuickAction("Pon música", Icons.Filled.MusicNote, "Pon música para concentrarme"),
             QuickAction("Enséñame algo", Icons.Filled.Image, "Enséñame una foto bonita de un paisaje")
         )
