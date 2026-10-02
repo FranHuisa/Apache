@@ -77,7 +77,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /** Silencios seguidos: con dos, se acaba la conversación sola. */
     private var silences = 0
 
-    val speechInput = SpeechInput(
+    val speechInput: SpeechInput = SpeechInput(
         application,
         onResult = { text -> onHeard(text) },
         onError = { message ->
