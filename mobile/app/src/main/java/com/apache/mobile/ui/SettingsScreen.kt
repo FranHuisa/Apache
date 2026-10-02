@@ -11,7 +11,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -22,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,8 +41,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.apache.mobile.ApacheApp
 import com.apache.mobile.data.Settings
+import com.apache.mobile.reminders.Briefing
+import com.apache.mobile.reminders.Notifications
+import java.time.LocalTime
+import kotlinx.coroutines.launch
 
-/** Ajustes: API key de Gemini, modelo y voz. */
+/** Ajustes: API key de Gemini, modelo, voz y resumen de buenos días. */
 @Composable
 fun SettingsScreen(onSaved: () -> Unit) {
     val settings = ApacheApp.get().settings
@@ -45,6 +57,11 @@ fun SettingsScreen(onSaved: () -> Unit) {
     var speak by remember { mutableStateOf(settings.speakReplies) }
     var showKey by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
+    var briefingOn by remember { mutableStateOf(settings.briefingEnabled) }
+    var briefingTime by remember { mutableStateOf(settings.briefingTime) }
+    var testing by remember { mutableStateOf(false) }
+    var preview by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)
@@ -72,7 +89,7 @@ fun SettingsScreen(onSaved: () -> Unit) {
         val cleaned = Settings.cleanApiKey(apiKey)
         if (apiKey.isNotBlank() && !Settings.looksLikeGeminiKey(cleaned)) {
             Text(
-                "Esto no parece una clave de Gemini: debe empezar por «AIza» y tener unos 39 caracteres.",
+                "Esto no parece una clave de Gemini: debe empezar por «AIza» (o «AQ.») y no llevar espacios.",
                 color = ApacheColors.danger, fontSize = 13.sp
             )
         } else if (apiKey.isNotBlank() && cleaned != apiKey.trim()) {
@@ -110,6 +127,57 @@ fun SettingsScreen(onSaved: () -> Unit) {
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        // Resumen de buenos días: se guarda al momento.
+        Text("Resumen de buenos días", color = ApacheColors.accent, fontSize = 15.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Notificación cada mañana", color = Color.White, fontSize = 15.sp)
+                Text("Agenda, tiempo, listas y 3 titulares.", color = ApacheColors.textMuted, fontSize = 13.sp)
+            }
+            Switch(
+                checked = briefingOn,
+                onCheckedChange = {
+                    briefingOn = it
+                    settings.briefingEnabled = it
+                    ApacheApp.get().alarms.scheduleBriefing()
+                },
+                colors = SwitchDefaults.colors(checkedTrackColor = ApacheColors.accent)
+            )
+        }
+        if (briefingOn) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Hora", color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                fun shift(minutes: Long) {
+                    val time = runCatching { LocalTime.parse(briefingTime) }.getOrDefault(LocalTime.of(8, 0)).plusMinutes(minutes)
+                    briefingTime = "%02d:%02d".format(time.hour, time.minute)
+                    settings.briefingTime = briefingTime
+                    ApacheApp.get().alarms.scheduleBriefing()
+                }
+                IconButton(onClick = { shift(-15) }) { Icon(Icons.Filled.Remove, contentDescription = "Antes", tint = ApacheColors.accentLight) }
+                Text(briefingTime, color = Color.White, fontSize = 20.sp)
+                IconButton(onClick = { shift(15) }) { Icon(Icons.Filled.Add, contentDescription = "Después", tint = ApacheColors.accentLight) }
+            }
+            TextButton(
+                enabled = !testing,
+                onClick = {
+                    testing = true
+                    scope.launch {
+                        val briefing = Briefing.build(ApacheApp.get())
+                        Notifications.showBriefing(context, briefing)
+                        preview = briefing.title + "\n" + briefing.text
+                        testing = false
+                    }
+                }
+            ) { Text(if (testing) "Preparando…" else "Probar ahora", color = ApacheColors.accentLight) }
+            preview?.let {
+                Surface(color = ApacheColors.card, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                    Text(it, color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(14.dp))
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
         Button(
             onClick = {
                 settings.apiKey = apiKey
@@ -127,6 +195,6 @@ fun SettingsScreen(onSaved: () -> Unit) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-        Text("Apache Móvil 0.1.0 · todo se guarda en este teléfono", color = ApacheColors.textFaint, fontSize = 12.sp)
+        Text("Apache Móvil 0.2.0 · todo se guarda en este teléfono", color = ApacheColors.textFaint, fontSize = 12.sp)
     }
 }

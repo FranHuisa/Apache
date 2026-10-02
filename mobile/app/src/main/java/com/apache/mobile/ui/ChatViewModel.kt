@@ -43,6 +43,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /** Aviso corto para enseñar en un Snackbar (imagen guardada, errores de voz...). */
     var notice by mutableStateOf<String?>(null)
 
+    /** Texto para la caja de escribir (lo rellena "Compartir con Apache"). */
+    var draft by mutableStateOf("")
+
+    /** Sube cada vez que llega algo compartido desde otra app (para abrir el chat). */
+    var shareCount by mutableStateOf(0)
+
     private var conversationId: Long? = apache.settings.conversationId
     private var localIds = -1L
 
@@ -164,6 +170,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 pendingAttachments = (pendingAttachments + attachment).take(5)
             }
         }
+    }
+
+    /**
+     * Algo compartido desde otra app (Compartir → Apache): un enlace o texto
+     * se pone en la caja de escribir con una pregunta sugerida; una imagen o
+     * un PDF se adjunta. El usuario lo revisa y lo envía.
+     */
+    fun receiveShare(text: String?, uris: List<Uri>) {
+        uris.take(5).forEach { addAttachment(it) }
+        val shared = text?.trim().orEmpty()
+        draft = when {
+            shared.isEmpty() -> if (uris.isNotEmpty()) "¿Qué me dices de esto?" else ""
+            Regex("^https?://\\S+$").matches(shared) -> "Resúmeme este enlace: $shared"
+            shared.contains("http://") || shared.contains("https://") -> "Resúmeme esto: $shared"
+            else -> "Sobre este texto:\n\n$shared\n\n"
+        }
+        shareCount++
     }
 
     fun removeAttachment(attachment: Attachment) {

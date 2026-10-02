@@ -87,6 +87,14 @@ private val SUGGESTIONS = listOf(
 fun ChatScreen(chat: ChatViewModel, onMic: () -> Unit) {
     val context = LocalContext.current
     var input by remember { mutableStateOf("") }
+
+    // Lo compartido desde otra app llega a la caja de escribir.
+    LaunchedEffect(chat.draft) {
+        if (chat.draft.isNotEmpty()) {
+            input = chat.draft
+            chat.draft = ""
+        }
+    }
     val listState = rememberLazyListState()
 
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->

@@ -28,6 +28,8 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
@@ -48,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.apache.mobile.ApacheApp
 import com.apache.mobile.data.CalendarEvent
+import com.apache.mobile.data.TaskListSummary
 import com.apache.mobile.tools.CurrentWeather
 import com.apache.mobile.tools.WeatherService
 import com.apache.mobile.ui.components.ApacheOrb
@@ -76,6 +79,8 @@ fun HomeScreen(chat: ChatViewModel, onOpenChat: () -> Unit, onOpenSchedule: () -
     var weather by remember { mutableStateOf<CurrentWeather?>(null) }
     var upcoming by remember { mutableStateOf<List<CalendarEvent>>(emptyList()) }
     var reminders by remember { mutableStateOf(0) }
+    var lists by remember { mutableStateOf<List<TaskListSummary>>(emptyList()) }
+    var weatherLoading by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
         val data = withContext(Dispatchers.IO) {
@@ -86,14 +91,18 @@ fun HomeScreen(chat: ChatViewModel, onOpenChat: () -> Unit, onOpenSchedule: () -
                     ?: app.memory.findByKey("ubicacion"))?.value,
                 upcoming = app.events.between(now.minusHours(1), LocalDate.now().atTime(23, 59))
                     .filter { it.status == "confirmed" }.take(3),
-                reminders = app.reminders.pending().size
+                reminders = app.reminders.pending().size,
+                lists = app.tasks.lists().filter { it.pending > 0 }
             )
         }
         name = data.name
         city = data.city
         upcoming = data.upcoming
         reminders = data.reminders
-        data.city?.let { weather = WeatherService.current(it) }
+        lists = data.lists
+        // Con ciudad guardada, esa; si no, donde está el móvil.
+        weather = WeatherService.current(data.city)
+        weatherLoading = false
     }
 
     val greeting = when (LocalTime.now().hour) {
@@ -151,8 +160,8 @@ fun HomeScreen(chat: ChatViewModel, onOpenChat: () -> Unit, onOpenSchedule: () -
                         Icon(Icons.Filled.WbSunny, contentDescription = null, tint = ApacheColors.accentLight, modifier = Modifier.size(34.dp))
                         Spacer(modifier = Modifier.width(14.dp))
                         Text(
-                            if (city == null) "Dile a Apache «recuerda que vivo en …» y verás aquí el tiempo de tu ciudad."
-                            else "Cargando el tiempo de $city…",
+                            if (weatherLoading) "Mirando el tiempo…"
+                            else "Activa la ubicación o dile a Apache «vivo en …» y verás aquí el tiempo.",
                             color = ApacheColors.accentSoft, fontSize = 14.sp
                         )
                     }
@@ -180,6 +189,13 @@ fun HomeScreen(chat: ChatViewModel, onOpenChat: () -> Unit, onOpenSchedule: () -
                         }
                     }
                     Spacer(modifier = Modifier.height(10.dp))
+                    if (lists.isNotEmpty()) {
+                        Text(
+                            "📝 Pendiente: " + lists.joinToString { "${it.name} (${it.pending})" },
+                            color = ApacheColors.accentSoft, fontSize = 13.sp,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                    }
                     if (upcoming.isEmpty()) {
                         Text("Nada más por hoy. Toca para organizar el día.", color = ApacheColors.textMuted, fontSize = 14.sp)
                     } else {
@@ -207,6 +223,8 @@ fun HomeScreen(chat: ChatViewModel, onOpenChat: () -> Unit, onOpenSchedule: () -
             QuickAction("Organiza mi día", Icons.Filled.AutoAwesome, "Organízame el día de hoy"),
             QuickAction("Noticias de hoy", Icons.Filled.Newspaper, "¿Cuáles son las noticias de hoy?"),
             QuickAction("¿Qué tiempo hace?", Icons.Filled.WbSunny, "¿Qué tiempo hace hoy y mañana?"),
+            QuickAction("Mi resumen", Icons.Filled.Today, "Dame mi resumen del día"),
+            QuickAction("Lista de la compra", Icons.Filled.ShoppingCart, "¿Qué tengo en la lista de la compra?"),
             QuickAction("Pon música", Icons.Filled.MusicNote, "Pon música para concentrarme"),
             QuickAction("Enséñame algo", Icons.Filled.Image, "Enséñame una foto bonita de un paisaje")
         )
@@ -248,7 +266,8 @@ private data class HomeData(
     val name: String?,
     val city: String?,
     val upcoming: List<CalendarEvent>,
-    val reminders: Int
+    val reminders: Int,
+    val lists: List<TaskListSummary>
 )
 
 private data class QuickAction(val label: String, val icon: ImageVector, val prompt: String)

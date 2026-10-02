@@ -15,6 +15,9 @@
         android:maxSdkVersion="32" />
     <!-- Volver a programar los recordatorios al reiniciar el móvil. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Ubicación aproximada o precisa: el tiempo de donde estás y "cerca de mí". -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- Poner alarmas y temporizadores en la app de reloj. -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
@@ -52,10 +55,24 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Compartir → Apache desde cualquier app: texto, enlaces, imágenes y PDF. -->
+            <intent-filter android:label="Preguntar a Apache">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter android:label="Preguntar a Apache">
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="application/pdf" />
             </intent-filter>
         </activity>
 

@@ -33,7 +33,7 @@ object Briefing {
         val weatherJob = async {
             withTimeoutOrNull(15_000) {
                 runCatching {
-                    val city = GetWeatherTool().homeCity()
+                    val city = withContext(Dispatchers.IO) { GetWeatherTool().homeCity() }
                     val saved = app.settings.lastLocation
                     when {
                         // En segundo plano no se puede pedir el GPS: última ubicación guardada.

@@ -1,6 +1,24 @@
 package com.apache.mobile
 
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.dp
+import com.apache.mobile.tools.DeviceLocation
+import com.apache.mobile.ui.TasksScreen
+import kotlinx.coroutines.launch
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -53,41 +71,81 @@ import com.apache.mobile.ui.SettingsScreen
 /** Única actividad de la app: toda la interfaz es Jetpack Compose. */
 class MainActivity : ComponentActivity() {
 
+    /** Lo que llega con "Compartir → Apache" antes de que el chat esté listo. */
+    private var pendingShare by mutableStateOf<SharedContent?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) pendingShare = readShare(intent)
         setContent {
             ApacheTheme {
-                ApacheMobileApp()
+                ApacheMobileApp(pendingShare, onShareConsumed = { pendingShare = null })
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        readShare(intent)?.let { pendingShare = it }
+    }
+
+    /** Texto, enlace o imágenes compartidos desde otra app. */
+    @Suppress("DEPRECATION")
+    private fun readShare(intent: Intent?): SharedContent? {
+        if (intent == null) return null
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+        val uris = when (intent.action) {
+            Intent.ACTION_SEND -> listOfNotNull(intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))
+            Intent.ACTION_SEND_MULTIPLE -> intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+            else -> return null
+        }
+        if (text.isNullOrBlank() && uris.isEmpty()) return null
+        return SharedContent(text, uris)
+    }
 }
+
+internal class SharedContent(val text: String?, val uris: List<Uri>)
 
 private enum class Section(val label: String, val icon: ImageVector) {
     HOME("Inicio", Icons.Filled.Home),
     CHAT("Chat", Icons.Filled.Chat),
-    SCHEDULE("Horario", Icons.Filled.CalendarMonth),
+    SCHEDULE("Agenda", Icons.Filled.CalendarMonth),
     MEMORY("Memoria", Icons.Filled.Psychology),
     SETTINGS("Ajustes", Icons.Filled.Settings)
 }
 
 @Composable
-private fun ApacheMobileApp() {
+private fun ApacheMobileApp(share: SharedContent?, onShareConsumed: () -> Unit) {
     val chat: ChatViewModel = viewModel()
     val settings = ApacheApp.get().settings
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     // Sin API key, se empieza en Ajustes.
     var section by rememberSaveable { mutableStateOf(if (settings.isConfigured) Section.HOME else Section.SETTINGS) }
     val snackbar = remember { SnackbarHostState() }
 
-    // Android 13+: permiso para los avisos de recordatorios y del horario.
-    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+    // Permisos al empezar: avisos (Android 13+) y ubicación (para el tiempo y "cerca de mí").
+    val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        if (granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true || granted[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+            scope.launch { DeviceLocation.current() }
         }
+    }
+    LaunchedEffect(Unit) {
+        val wanted = mutableListOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) wanted += Manifest.permission.POST_NOTIFICATIONS
+        val missing = wanted.filter { ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty()) permissions.launch(missing.toTypedArray()) else DeviceLocation.current()
         chat.dailySummaryIfNeeded()
+    }
+
+    // Compartir → Apache: se abre el chat con lo compartido.
+    LaunchedEffect(share) {
+        share?.let {
+            chat.receiveShare(it.text, it.uris)
+            section = Section.CHAT
+            onShareConsumed()
+        }
     }
 
     // Micrófono: pide permiso la primera vez y luego empieza/para de escuchar.
@@ -151,12 +209,45 @@ private fun ApacheMobileApp() {
                         onMic = onMic
                     )
                     Section.CHAT -> ChatScreen(chat, onMic)
-                    Section.SCHEDULE -> ScheduleScreen(chat)
+                    Section.SCHEDULE -> PlannerScreen(chat)
                     Section.MEMORY -> MemoryScreen(chat, onOpenChat = { section = Section.CHAT })
                     Section.SETTINGS -> SettingsScreen(onSaved = {
                         chat.dailySummaryIfNeeded()
                         section = Section.HOME
                     })
+                }
+            }
+        }
+    }
+}
+
+/** Agenda: el horario del día y las listas, con un selector arriba. */
+@Composable
+private fun PlannerScreen(chat: ChatViewModel) {
+    var tab by rememberSaveable { mutableStateOf(0) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 4.dp).fillMaxWidth()
+                .clip(RoundedCornerShape(50)).background(ApacheColors.surface).padding(4.dp)
+        ) {
+            listOf("Horario", "Listas").forEachIndexed { index, label ->
+                val selected = tab == index
+                val bg by animateColorAsState(if (selected) ApacheColors.accent else Color.Transparent, label = "planner$index")
+                Box(
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(50)).background(bg)
+                        .clickable { tab = index }.padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(label, color = if (selected) Color.Black else ApacheColors.textMuted, fontSize = 14.sp)
+                }
+            }
+        }
+        Box(modifier = Modifier.weight(1f)) {
+            if (tab == 0) ScheduleScreen(chat) else {
+                Column {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    TasksScreen(chat)
                 }
             }
         }
