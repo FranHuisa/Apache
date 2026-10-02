@@ -22,6 +22,8 @@ import com.apache.ui.chat.ChatController
 import com.apache.ui.chat.ChatScreen
 import com.apache.ui.components.NotificationsOverlay
 import com.apache.ui.components.Sidebar
+import com.apache.ui.listas.ListasScreen
+import com.apache.ui.listas.ListsController
 import com.apache.ui.memoria.MemoriaScreen
 import com.apache.ui.memoria.MemoryController
 import com.apache.ui.notifications.NotificationsController
@@ -49,6 +51,7 @@ fun App() {
     val notificationsController = remember { NotificationsController(scope) }
     val scheduleController = remember { ScheduleController(scope, chatController) }
     val memoryController = remember { MemoryController(scope) }
+    val listsController = remember { ListsController(scope) }
 
     // El Horario también puede abrirse en una ventana aparte (más pequeña) para
     // tenerlo a la vista mientras se usa el resto de Apache.
@@ -99,6 +102,7 @@ fun App() {
                             chat = chatController,
                             onOpenChat = { selectedSection = "Chat" }
                         )
+                        "Listas" -> ListasScreen(listsController)
                         "Ayuda" -> AyudaScreen()
                     }
                 }

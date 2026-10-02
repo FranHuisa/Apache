@@ -17,7 +17,7 @@ import androidx.compose.ui.unit.sp
 import com.apache.ui.theme.ApacheColors
 
 /** Secciones disponibles en la barra lateral. */
-val sidebarSections = listOf("Chat", "Calendario", "Horario", "Memoria", "Ayuda")
+val sidebarSections = listOf("Chat", "Calendario", "Horario", "Listas", "Memoria", "Ayuda")
 
 /** Barra lateral de navegación entre secciones de Apache Desktop. */
 @Composable

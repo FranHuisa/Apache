@@ -1,5 +1,21 @@
 # Bitácora de desarrollo — Apache
 
+## 02/10/2026 (madrugada, 2) — Resumen de buenos días, ubicación, listas y compartir
+
+### Móvil
+* **Resumen de buenos días:** notificación diaria (por defecto a las 08:00) con el tiempo, la agenda de hoy, recordatorios, listas pendientes y 3 titulares. No usa Gemini, así que llega aunque falle la API key. Se configura en Ajustes (activar, hora con −/+ y «Probar ahora») o por voz («pon el resumen a las 7:30», herramienta `setBriefing`). `getBriefing` lo da en el chat. Se vuelve a programar al reiniciar el móvil.
+* **Ubicación:** `DeviceLocation` (GPS o red, sin Google Play Services) y permiso de ubicación al abrir la app. `getWeather` sin ciudad usa donde está el móvil; nueva `getMyLocation` para «¿dónde estoy?» o «cerca de mí». La última ubicación se guarda para el resumen, que corre en segundo plano.
+* **Listas:** tabla `task` (base de datos versión 2, migración aditiva), `TaskStore` y herramientas `addToList`, `getList`, `updateListItem` y `clearList`. La pestaña Horario pasa a ser «Agenda», con un selector Horario | Listas; en Listas se tacha tocando y se quita con ✕.
+* **Compartir con Apache:** desde cualquier app, Compartir → Apache. Los enlaces y el texto llegan a la caja de escribir con una pregunta sugerida; las imágenes y los PDF se adjuntan. Nueva `readWebPage` lee el texto de un enlace.
+* Inicio: accesos «Mi resumen» y «Lista de la compra», y lo pendiente de las listas en la tarjeta «Hoy».
+
+### Escritorio
+* **Listas:** tabla `user_list_item`, `UserListService`, API `/api/lists`, las mismas cuatro herramientas y una sección «Listas» nueva en la barra lateral.
+* **Ubicación aproximada por IP** (ipwho.is, con ipapi.co de respaldo): `getWeather` sin ciudad ni ciudad en la memoria la usa; nueva `getMyLocation`.
+* `readWebPage` para resumir enlaces pegados.
+* El resumen del día al abrir Apache incluye ahora el tiempo, las listas y 3 titulares.
+* Compartir desde otras apps no aplica al PC (ya existen los adjuntos y la captura de pantalla).
+
 ## 02/10/2026 (madrugada) — Noticias y tiempo más fiable (móvil y escritorio)
 
 ### Problemas
