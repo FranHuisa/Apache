@@ -21,12 +21,16 @@ import org.springframework.web.bind.annotation.RestController
 @Component
 class ShownImagesStore {
 
+    // Campo privado + getter: con el plugin kotlin-spring las clases @Component son
+    // "open" y Kotlin no permite `private set` en propiedades abiertas.
     @Volatile
-    var lastShown: List<ChatImage> = emptyList()
-        private set
+    private var images: List<ChatImage> = emptyList()
 
-    fun remember(images: List<ChatImage>) {
-        if (images.isNotEmpty()) lastShown = images
+    val lastShown: List<ChatImage>
+        get() = images
+
+    fun remember(newImages: List<ChatImage>) {
+        if (newImages.isNotEmpty()) images = newImages
     }
 }
 
