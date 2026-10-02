@@ -18,7 +18,7 @@ private fun Context.launch(intent: Intent): Boolean =
     try {
         startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         true
-    } catch (_: Exception) {
+    } catch (e: Exception) {
         false
     }
 

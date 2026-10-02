@@ -23,7 +23,7 @@ class ReminderReceiver : BroadcastReceiver() {
             CoroutineScope(Dispatchers.Default).launch {
                 try {
                     Notifications.showBriefing(context, Briefing.build(app))
-                } catch (_: Exception) {
+                } catch (e: Exception) {
                 } finally {
                     app.alarms.scheduleBriefing()
                     pending.finish()

@@ -178,7 +178,7 @@ class SearchImagesTool(private val gemini: GeminiClient) : Tool {
                     .toList()
                     .ifEmpty { null }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             null
         }
     }
