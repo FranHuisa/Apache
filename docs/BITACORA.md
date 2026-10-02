@@ -1,5 +1,20 @@
 # Bitácora de desarrollo — Apache
 
+## 02/10/2026 (tarde) — feature/movil: interfaz interactiva y arreglo del 401
+
+### Problemas
+* Error 401 de Gemini: la clave se había pegado con texto de más (espacios, comillas, «GEMINI_API_KEY=»).
+* La interfaz parecía básica y poco viva.
+
+### Soluciones
+* `Settings.cleanApiKey` limpia la clave al guardarla y al leerla; si la clave no parece de Gemini, Ajustes lo avisa. Los errores 400, 401 y 403 se explican en español.
+* Interfaz rehecha en Jetpack Compose:
+  * **Inicio (nuevo):** saludo con tu nombre, tiempo de tu ciudad (Open-Meteo, a partir de la memoria «ciudad»), lo próximo de hoy, accesos rápidos y micrófono grande. Las tarjetas aparecen con animación.
+  * **Chat:** orbe de Apache que late mientras piensa, burbujas que entran deslizándose, puntos de «escribiendo…», sugerencias para tocar, micrófono con ondas, imágenes con botones de guardar y abrir, y pulsación larga para copiar.
+  * **Horario:** tira de días, línea de tiempo con la hora actual en rojo, deslizar a la derecha para completar y a la izquierda para cancelar, y «Organizar con Apache».
+  * **Memoria:** tarjetas por categoría que se despliegan, con iconos, buscador y botón + flotante.
+  * Navegación con iconos de Material en lugar de emojis; el permiso del micrófono se pide al tocarlo por primera vez.
+
 ## 02/10/2026 — feature/movil: Apache Móvil 0.1.0 (Android)
 
 ### Objetivo
