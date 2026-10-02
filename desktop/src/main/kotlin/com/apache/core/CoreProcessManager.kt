@@ -178,7 +178,7 @@ object CoreProcessManager {
             // Core generado directamente por Gradle.
             File(
                 currentDirectory,
-                "core/build/libs/core-0.1.0.jar"
+                "core/build/libs/core-0.2.0.jar"
             ),
 
             // Ubicación utilizada si el Core se encuentra
@@ -191,7 +191,7 @@ object CoreProcessManager {
             // Ubicación alternativa para el JAR empaquetado.
             File(
                 currentDirectory,
-                "core/core-0.1.0.jar"
+                "core/core-0.2.0.jar"
             )
         )
 

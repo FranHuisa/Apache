@@ -24,7 +24,7 @@ fun downloadImageBitmap(url: String): ImageBitmap {
     val request = Request.Builder()
         .url(url)
         // Wikimedia rechaza peticiones sin un User-Agent identificable.
-        .header("User-Agent", "ApacheDesktop/0.1 (asistente personal de escritorio)")
+        .header("User-Agent", "ApacheDesktop/0.2 (asistente personal de escritorio)")
         .get()
         .build()
 

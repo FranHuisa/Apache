@@ -1,5 +1,28 @@
 # Bitácora de desarrollo — Apache
 
+## 02/10/2026 — Versión 0.2.0
+
+### Qué incluye Apache 0.2.0
+
+Todo lo hecho desde la 0.1 queda fusionado en `main` y etiquetado como `v0.2.0` en GitHub:
+
+* **Chat**: imágenes en las respuestas (verificadas por Gemini, guardado solo bajo petición), adjuntos (imágenes, PDF, texto), «¿qué hay en mi pantalla?», confirmaciones con botones Sí / No, respuestas cortas y naturales, modo voz más breve y mensajes claros cuando Gemini está lento o saturado.
+* **Horario**: línea de tiempo diaria, bloques editables, «Organizar mi día» con Apache, ventana aparte y avisos de Windows al empezar cada bloque.
+* **Memoria**: datos permanentes del usuario (`user_memory`) que Apache usa en cada conversación, y sección Memoria con datos editables e historial de conversaciones retomables.
+* **Música**: poner una canción concreta (YouTube, o Spotify por API si se configura).
+* **Internet y archivos**: búsqueda en Google vía Gemini, y buscar, listar recientes y abrir archivos del PC.
+* **Resumen del día** la primera vez que se abre Apache cada día.
+* **Smart Home**: base MQTT opcional (desactivada sin `smarthome.json`).
+* **Estabilidad**: el Core ya no se bloquea al llenarse su salida (`~/.apache/core.log`), timeouts y reintentos con Gemini, y build de Gradle sin plugins duplicados ni daemons de Kotlin.
+
+### Cambios de versión
+
+* `version` y `packageVersion` = `0.2.0` en `core` y `desktop`, la barra lateral muestra «Apache 0.2.0», y `CoreProcessManager` busca `core-0.2.0.jar` en las rutas de desarrollo.
+
+### Siguiente fase — Apache móvil (Android)
+
+* Ver la entrada siguiente en esta bitácora cuando empiece.
+
 ## 01/10/2026 (noche) — feature/mejoras
 
 ### Objetivo

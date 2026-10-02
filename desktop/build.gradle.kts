@@ -10,7 +10,7 @@ plugins {
 
 group = "com.apache"
 
-version = "0.1.0"
+version = "0.2.0"
 
 repositories {
 
@@ -155,7 +155,7 @@ compose.desktop {
 
             packageName = "Apache"
 
-            packageVersion = "0.1.0"
+            packageVersion = "0.2.0"
 
             description = "Apache — asistente local de escritorio"
 

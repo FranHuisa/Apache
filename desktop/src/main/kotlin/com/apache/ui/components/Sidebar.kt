@@ -46,6 +46,6 @@ fun Sidebar(selectedSection: String, onSectionSelected: (String) -> Unit) {
         // Empuja la versión hacia la parte inferior.
         Spacer(modifier = Modifier.weight(1f))
 
-        Text(text = "Apache 0.1.0", color = ApacheColors.textFaint, fontSize = 12.sp)
+        Text(text = "Apache 0.2.0", color = ApacheColors.textFaint, fontSize = 12.sp)
     }
 }

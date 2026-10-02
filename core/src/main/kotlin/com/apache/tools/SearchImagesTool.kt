@@ -325,7 +325,7 @@ class SearchImagesTool(
 
         private const val MAX_VERIFY_BYTES = 1_500_000
         private const val RECENT_LIMIT = 60
-        const val USER_AGENT = "ApacheDesktop/0.1 (asistente personal de escritorio)"
+        const val USER_AGENT = "ApacheDesktop/0.2 (asistente personal de escritorio)"
 
         private val SUPPORTED_MIME_TYPES = setOf("image/jpeg", "image/png", "image/webp")
     }
