@@ -107,9 +107,13 @@ class GeminiClient(private val settings: Settings) {
             }
 
             if ((code == 400 && "API key" in text) || code == 401 || code == 403) {
+                // Mensaje de Google (nunca incluye la clave) y forma de la clave guardada, para saber qué falla.
+                val google = runCatching { JSONObject(text).getJSONObject("error").optString("message") }
+                    .getOrNull().orEmpty().replace(apiKey, "***").take(200)
+                val shape = "empieza por «${apiKey.take(4)}», ${apiKey.length} caracteres"
                 throw GeminiException(
-                    "Google no acepta la API key (error $code). Ve a Ajustes, borra la clave y pega solo " +
-                        "el texto que empieza por «AIza» (unos 39 caracteres), sin comillas ni nada delante."
+                    "Google no acepta la API key (error $code: $google). La clave guardada $shape. " +
+                        "Debe empezar por «AIza» y tener 39 caracteres: créala en aistudio.google.com/apikey y pégala en Ajustes."
                 )
             }
             if (code == 404) throw GeminiException("El modelo «${settings.model}» no existe. Cámbialo en Ajustes.")
