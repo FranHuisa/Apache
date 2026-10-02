@@ -17,6 +17,7 @@ class ToolRegistry(private val tools: List<Tool>) {
         fun create(app: ApacheApp, gemini: GeminiClient) = ToolRegistry(
             listOf(
                 GetWeatherTool(),
+                GetNewsTool(),
                 WebSearchTool(gemini),
                 SearchImagesTool(gemini),
                 SaveImageTool(app),
