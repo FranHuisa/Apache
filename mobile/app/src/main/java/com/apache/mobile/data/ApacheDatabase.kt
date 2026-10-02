@@ -1,0 +1,131 @@
+package com.apache.mobile.data
+
+import android.content.ContentValues
+import android.content.Context
+import android.database.Cursor
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
+import java.time.LocalDateTime
+
+/**
+ * Base de datos local de Apache Móvil (SQLite del propio teléfono).
+ *
+ * Equivale a las tablas de MySQL del Core de escritorio, pero simplificada
+ * para un solo usuario:
+ *  - conversation / message: historial del chat.
+ *  - memory: lo que Apache recuerda del usuario.
+ *  - event: calendario y bloques del horario.
+ *  - reminder: recordatorios con aviso.
+ *
+ * Se usa SQLite "a mano" (sin Room) para no necesitar procesadores de
+ * anotaciones en la compilación.
+ */
+class ApacheDatabase(context: Context) : SQLiteOpenHelper(context, NAME, null, VERSION) {
+
+    override fun onCreate(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE conversation (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execSQL(
+            """
+            CREATE TABLE message (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content_json TEXT NOT NULL,
+                display_text TEXT,
+                images_json TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execSQL("CREATE INDEX idx_message_conversation ON message(conversation_id)")
+        db.execSQL(
+            """
+            CREATE TABLE memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL,
+                memory_key TEXT NOT NULL,
+                memory_value TEXT NOT NULL,
+                importance REAL NOT NULL DEFAULT 0.5,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execSQL(
+            """
+            CREATE TABLE event (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                location TEXT,
+                start_at TEXT NOT NULL,
+                end_at TEXT,
+                status TEXT NOT NULL DEFAULT 'confirmed'
+            )
+            """
+        )
+        db.execSQL(
+            """
+            CREATE TABLE reminder (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                trigger_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending'
+            )
+            """
+        )
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        // Versión 1: todavía no hay migraciones. Cuando cambie el esquema, se
+        // añadirán aquí de forma aditiva (ALTER TABLE ...) para no perder datos.
+    }
+
+    companion object {
+        private const val NAME = "apache.db"
+        private const val VERSION = 1
+
+        fun now(): String = LocalDateTime.now().withNano(0).toString()
+    }
+}
+
+// --- Utilidades para leer cursores ---
+
+internal fun Cursor.string(column: String): String = getString(getColumnIndexOrThrow(column))
+
+internal fun Cursor.stringOrNull(column: String): String? {
+    val index = getColumnIndexOrThrow(column)
+    return if (isNull(index)) null else getString(index)
+}
+
+internal fun Cursor.long(column: String): Long = getLong(getColumnIndexOrThrow(column))
+
+internal fun Cursor.double(column: String): Double = getDouble(getColumnIndexOrThrow(column))
+
+internal inline fun <T> Cursor.mapRows(block: (Cursor) -> T): List<T> = use {
+    val result = mutableListOf<T>()
+    while (moveToNext()) result.add(block(this))
+    result
+}
+
+internal fun contentValues(vararg pairs: Pair<String, Any?>): ContentValues = ContentValues().apply {
+    pairs.forEach { (key, value) ->
+        when (value) {
+            null -> putNull(key)
+            is String -> put(key, value)
+            is Long -> put(key, value)
+            is Int -> put(key, value)
+            is Double -> put(key, value)
+            is Boolean -> put(key, if (value) 1 else 0)
+            else -> put(key, value.toString())
+        }
+    }
+}

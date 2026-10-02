@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tema base oscuro; los colores reales los pone Compose (ApacheTheme). -->
+    <style name="Theme.Apache" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#121212</item>
+        <item name="android:navigationBarColor">#181818</item>
+        <item name="android:windowBackground">@color/background</item>
+    </style>
+</resources>

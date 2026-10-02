@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icono: una "A" verde estilizada sobre fondo oscuro (zona segura de 66dp en un lienzo de 108dp). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#1DB954"
+        android:pathData="M54,30 L74,78 L65,78 L60.5,66 L47.5,66 L43,78 L34,78 Z M54,44 L50,58 L58,58 Z" />
+</vector>
