@@ -1,5 +1,16 @@
 # Bitácora de desarrollo — Apache
 
+## 02/10/2026 (madrugada) — Noticias y tiempo más fiable (móvil y escritorio)
+
+### Problemas
+* No había herramienta de noticias (se usaba webSearch, más lento y menos fiable).
+* El tiempo fallaba mucho: se buscaba el texto tal cual («Madrid, España» no da resultados), se cogía el primer resultado (Córdoba de Argentina), no había reintentos y si no se decía la ciudad no funcionaba.
+
+### Soluciones
+* **getNews** (nueva, en móvil y escritorio): RSS público de Google Noticias en español de España, sin API key. Titulares generales, secciones (deportes, economía, tecnología, ciencia, salud, internacional, entretenimiento) o un tema concreto (últimos 3 días). Quita repetidas y da medio y hace cuánto. Código común en `NewsFeed.kt`.
+* **getWeather** rehecha: `GeoLookup.kt` limpia el nombre («el tiempo en…», «Ciudad, provincia», «Ciudad (provincia)»), prueba variantes sin tildes y elige el sitio por provincia/país o, si no, mejor en España. Reintento por petición, timeouts más largos y respaldo en wttr.in. Sin ciudad usa la de la memoria. Siempre da hoy y mañana, con sensación térmica, humedad, viento y probabilidad de lluvia.
+* Móvil: accesos rápidos «Noticias de hoy» y «¿Qué tiempo hace?» en Inicio. Probado en el emulador: las noticias funcionan.
+
 ## 02/10/2026 (tarde) — feature/movil: interfaz interactiva y arreglo del 401
 
 ### Problemas
