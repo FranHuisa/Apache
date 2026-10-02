@@ -51,7 +51,15 @@ class Agent(
 
         // Lo que se envía a Gemini lleva los adjuntos; lo que se guarda, solo su nombre.
         val userText = text.ifBlank { "¿Qué ves en esto?" }
-        val userContent = userContent(userText, attachments)
+        // Si es la frase de una rutina, a Gemini le llegan sus pasos (al chat, lo que dijo).
+        val routine = if (attachments.isEmpty()) com.apache.mobile.ApacheApp.get().routines.match(text) else null
+        val geminiText = if (routine == null) userText else {
+            com.apache.mobile.ApacheApp.get().routines.markRun(routine.id)
+            "$userText\n\n(Es mi rutina «${routine.trigger}». Haz todos estos pasos con las herramientas, en orden, " +
+                "y al final resúmelo en una o dos frases:\n" +
+                routine.steps.mapIndexed { i, step -> "${i + 1}. $step" }.joinToString("\n") + ")"
+        }
+        val userContent = userContent(geminiText, attachments)
         val storedText = if (attachments.isEmpty()) userText else "$userText\n[Adjuntos: ${attachments.joinToString { it.name }}]"
         val storedContent = userContent(storedText, emptyList())
 
@@ -70,7 +78,12 @@ class Agent(
         working.put(userContent)
 
         val images = mutableListOf<ChatImage>()
-        val instruction = Prompt.systemInstruction(memory.contextForPrompt(), fromVoice)
+        val app = com.apache.mobile.ApacheApp.get()
+        val routineList = app.routines.all()
+        val instruction = Prompt.systemInstruction(
+            memory.contextForPrompt(), fromVoice,
+            routineList.joinToString("\n") { r -> "- «${r.trigger}» → ${r.steps.joinToString("; ")}" }
+        )
 
         repeat(MAX_STEPS) {
             val modelContent = gemini.generate(working, instruction, tools.declarations())
@@ -191,7 +204,7 @@ class Agent(
     }
 
     private companion object {
-        const val MAX_STEPS = 6
+        const val MAX_STEPS = 10
         const val MAX_IMAGES = 3
         const val MAX_HISTORY = 40
     }

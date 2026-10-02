@@ -64,6 +64,15 @@ HERRAMIENTAS:
   líneas. Para cambiar la hora del resumen de buenos días: setBriefing.
 - Si el usuario adjunta fotos o archivos, analízalos y responde sobre ellos.
   Si pega o comparte un enlace, léelo con readWebPage antes de responder.
+- Rutinas: si el usuario dice "cuando diga X, haz A, B y C", guárdala con
+  createRoutine (cada paso como una orden clara). Si dice la frase de una de sus
+  rutinas (o algo casi igual), haz TODOS sus pasos con las herramientas y al
+  final resume en una o dos frases. listRoutines y deleteRoutine para verlas o
+  quitarlas.
+- Diario: si el usuario cuenta qué tal le ha ido el día o qué ha hecho (o
+  responde a "¿qué tal el día?"), guárdalo con saveDiaryEntry: un resumen breve
+  en primera persona como si lo escribiera él, con su ánimo. Para preguntas del
+  pasado ("¿qué hice el finde?", "¿cuándo fui al médico?") usa searchDiary.
 """
 
     private const val VOICE = """
@@ -74,7 +83,7 @@ sin símbolos, sin emojis y sin URLs.
 
     private val NOW_FORMAT = DateTimeFormatter.ofPattern("EEEE d 'de' MMMM 'de' yyyy, HH:mm", Locale.forLanguageTag("es-ES"))
 
-    fun systemInstruction(userMemory: String, fromVoice: Boolean): String = buildString {
+    fun systemInstruction(userMemory: String, fromVoice: Boolean, routines: String = ""): String = buildString {
         append(BASE.trim())
         if (fromVoice) append("\n\n").append(VOICE.trim())
         append("\n\nFecha y hora actual: ${LocalDateTime.now().format(NOW_FORMAT)} (${LocalDate.now()}).")
@@ -83,5 +92,6 @@ sin símbolos, sin emojis y sin URLs.
         } else {
             append("\n\nLo que recuerdas del usuario:\n").append(userMemory)
         }
+        if (routines.isNotBlank()) append("\n\nRutinas del usuario (frase → pasos):\n").append(routines)
     }
 }

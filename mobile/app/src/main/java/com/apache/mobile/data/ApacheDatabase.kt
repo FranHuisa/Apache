@@ -17,6 +17,8 @@ import java.time.LocalDateTime
  *  - event: calendario y bloques del horario.
  *  - reminder: recordatorios con aviso.
  *  - task: tareas y listas (compra, pendientes...). Desde la versión 2.
+ *  - routine: rutinas por voz ("me voy a dormir" → varios pasos). Desde la versión 3.
+ *  - diary: diario, una entrada por día. Desde la versión 3.
  *
  * Se usa SQLite "a mano" (sin Room) para no necesitar procesadores de
  * anotaciones en la compilación.
@@ -84,11 +86,37 @@ class ApacheDatabase(context: Context) : SQLiteOpenHelper(context, NAME, null, V
             """
         )
         createTaskTable(db)
+        createRoutineAndDiaryTables(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         // Migraciones aditivas: nunca se borran datos.
         if (oldVersion < 2) createTaskTable(db)
+        if (oldVersion < 3) createRoutineAndDiaryTables(db)
+    }
+
+    private fun createRoutineAndDiaryTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS routine (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trigger_phrase TEXT NOT NULL,
+                steps TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_run TEXT
+            )
+            """
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS diary (
+                day TEXT PRIMARY KEY,
+                text TEXT NOT NULL,
+                mood TEXT,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
     }
 
     private fun createTaskTable(db: SQLiteDatabase) {
@@ -109,7 +137,7 @@ class ApacheDatabase(context: Context) : SQLiteOpenHelper(context, NAME, null, V
 
     companion object {
         private const val NAME = "apache.db"
-        private const val VERSION = 2
+        private const val VERSION = 3
 
         fun now(): String = LocalDateTime.now().withNano(0).toString()
     }

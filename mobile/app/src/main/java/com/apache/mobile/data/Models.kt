@@ -50,3 +50,9 @@ data class TaskItem(
 
 /** Resumen de una lista: cuántos quedan y cuántos hay en total. */
 data class TaskListSummary(val name: String, val pending: Int, val total: Int)
+
+/** Rutina por voz: al decir [trigger], Apache hace todos los [steps]. */
+data class Routine(val id: Long, val trigger: String, val steps: List<String>, val lastRun: String?)
+
+/** Entrada del diario de un día. */
+data class DiaryEntry(val day: java.time.LocalDate, val text: String, val mood: String?)
