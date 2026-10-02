@@ -9,6 +9,7 @@ import com.apache.mobile.data.EventStore
 import com.apache.mobile.data.MemoryStore
 import com.apache.mobile.data.ReminderStore
 import com.apache.mobile.data.Settings
+import com.apache.mobile.data.TaskStore
 import com.apache.mobile.reminders.AlarmScheduler
 import com.apache.mobile.reminders.Notifications
 import com.apache.mobile.tools.ToolRegistry
@@ -33,6 +34,8 @@ class ApacheApp : Application() {
         private set
     lateinit var reminders: ReminderStore
         private set
+    lateinit var tasks: TaskStore
+        private set
     lateinit var alarms: AlarmScheduler
         private set
     lateinit var agent: Agent
@@ -48,9 +51,11 @@ class ApacheApp : Application() {
         memory = MemoryStore(database)
         events = EventStore(database)
         reminders = ReminderStore(database)
+        tasks = TaskStore(database)
         alarms = AlarmScheduler(this)
 
         Notifications.createChannels(this)
+        alarms.scheduleBriefing()
 
         val gemini = GeminiClient(settings)
         val tools = ToolRegistry.create(this, gemini)

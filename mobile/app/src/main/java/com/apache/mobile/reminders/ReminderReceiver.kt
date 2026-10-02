@@ -5,6 +5,9 @@ import android.content.Context
 import android.content.Intent
 import com.apache.mobile.ApacheApp
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /** Llega a la hora de un recordatorio o del comienzo de un evento y muestra el aviso. */
 class ReminderReceiver : BroadcastReceiver() {
@@ -13,6 +16,21 @@ class ReminderReceiver : BroadcastReceiver() {
         val app = context.applicationContext as ApacheApp
         val id = intent.getLongExtra(EXTRA_ID, -1)
         if (id <= 0) return
+
+        if (intent.getStringExtra(EXTRA_KIND) == AlarmScheduler.KIND_BRIEFING) {
+            // Necesita internet (tiempo y noticias): se hace en segundo plano y se programa el de mañana.
+            val pending = goAsync()
+            CoroutineScope(Dispatchers.Default).launch {
+                try {
+                    Notifications.showBriefing(context, Briefing.build(app))
+                } catch (_: Exception) {
+                } finally {
+                    app.alarms.scheduleBriefing()
+                    pending.finish()
+                }
+            }
+            return
+        }
 
         when (intent.getStringExtra(EXTRA_KIND)) {
             AlarmScheduler.KIND_REMINDER -> {

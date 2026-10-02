@@ -19,17 +19,24 @@ class GetWeatherTool : Tool {
     override val description =
         "Consulta el tiempo: ahora, hoy, mañana o los próximos días (temperatura, lluvia, viento). " +
             "Úsala siempre que pregunten por el tiempo, la lluvia, si hace frío o si llevar paraguas. " +
-            "Si el usuario no dice la ciudad, déjala vacía y se usará la de su memoria."
+            "Si el usuario no dice la ciudad, déjala vacía: se usa dónde está el móvil (o su ciudad guardada)."
 
     override val parameters = Schema.obj(
-        "location" to Schema.string("Ciudad o pueblo, con provincia o país si hay duda, ej: 'Córdoba', 'Mérida, Badajoz'. Vacío = su ciudad."),
+        "location" to Schema.string("Ciudad o pueblo, con provincia o país si hay duda, ej: 'Córdoba', 'Mérida, Badajoz'. Vacío = donde está ahora."),
         "days" to Schema.integer("Días de previsión incluyendo hoy (1-7). Por defecto 2 (hoy y mañana).")
     )
 
     override suspend fun execute(args: JSONObject): String {
-        val location = args.str("location") ?: homeCity()
-            ?: return "No sé de qué ciudad. Pregúntale al usuario dónde vive y guárdalo con rememberFact (clave 'ciudad')."
         val days = (args.int("days") ?: 2).coerceIn(1, 7)
+        val location = args.str("location")
+
+        if (location == null) {
+            // Sin ciudad: donde está el móvil y, si no, la ciudad de su memoria.
+            val report = runCatching { WeatherService.home(days, homeCity()) }.getOrNull()
+                ?: return "No sé dónde estás: no tengo permiso de ubicación ni su ciudad en la memoria. " +
+                    "Pregúntale al usuario dónde vive y guárdalo con rememberFact (clave 'ciudad')."
+            return WeatherService.format(report, days)
+        }
 
         val report = try {
             WeatherService.report(location, days)
@@ -41,7 +48,7 @@ class GetWeatherTool : Tool {
         return WeatherService.format(report, days)
     }
 
-    private fun homeCity(): String? = runCatching {
+    fun homeCity(): String? = runCatching {
         val memory = ApacheApp.get().memory
         listOf("ciudad", "ubicación", "ubicacion", "vivo en", "localidad", "pueblo")
             .firstNotNullOfOrNull { memory.findByKey(it)?.value?.takeIf(String::isNotBlank) }
@@ -128,5 +135,55 @@ class WebSearchTool(private val gemini: GeminiClient) : Tool {
             appendLine(answer)
             if (sources.isNotEmpty()) appendLine("Fuentes: ${sources.joinToString()}")
         }.trim()
+    }
+}
+
+/** Dónde está el usuario ahora (GPS o red del móvil). */
+class GetMyLocationTool : Tool {
+
+    override val name = "getMyLocation"
+
+    override val description =
+        "Dice dónde está el usuario ahora (pueblo o ciudad y coordenadas) según el móvil. Úsala para " +
+            "preguntas como '¿dónde estoy?' o antes de buscar algo 'cerca de mí' (luego usa webSearch " +
+            "con el nombre del sitio, ej: 'farmacias de guardia en Almería')."
+
+    override val parameters = Schema.obj()
+
+    override suspend fun execute(args: JSONObject): String {
+        val location = DeviceLocation.current()
+            ?: return "No sé dónde está: el móvil no da la ubicación (permiso denegado o ubicación apagada). " +
+                "Pídele que active la ubicación o que te diga dónde está."
+        val coords = "%.4f, %.4f".format(java.util.Locale.US, location.latitude, location.longitude)
+        return if (location.place != null) "El usuario está en ${location.place} (coordenadas $coords)."
+        else "El usuario está en las coordenadas $coords (no sé el nombre del sitio)."
+    }
+}
+
+/** Lee el texto de una página web (para "resúmeme este enlace"). */
+class ReadWebPageTool : Tool {
+
+    override val name = "readWebPage"
+
+    override val description =
+        "Lee el texto de una página web a partir de su enlace (http/https). Úsala cuando el usuario " +
+            "comparta o pegue un enlace y pida resumirlo o preguntar algo sobre él."
+
+    override val parameters = Schema.obj(
+        "url" to Schema.string("Enlace completo de la página."),
+        required = listOf("url")
+    )
+
+    override suspend fun execute(args: JSONObject): String = withContext(Dispatchers.IO) {
+        val url = args.str("url")?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+            ?: return@withContext "El enlace no es válido."
+        val html = try {
+            Http.getText(url)
+        } catch (e: Exception) {
+            return@withContext "No he podido abrir la página (${e.message})."
+        }
+        val text = WebText.extract(html)
+        if (text.isBlank()) "La página no tiene texto que se pueda leer (puede que necesite iniciar sesión)."
+        else "Texto de la página ($url):\n$text"
     }
 }

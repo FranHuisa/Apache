@@ -17,6 +17,8 @@ object Notifications {
 
     const val CHANNEL_REMINDERS = "recordatorios"
     const val CHANNEL_SCHEDULE = "horario"
+    const val CHANNEL_BRIEFING = "resumen"
+    private const val BRIEFING_NOTIFICATION = 3_000_000
 
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -26,6 +28,9 @@ object Notifications {
         )
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_SCHEDULE, "Horario", NotificationManager.IMPORTANCE_DEFAULT)
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_BRIEFING, "Resumen de buenos días", NotificationManager.IMPORTANCE_DEFAULT)
         )
     }
 
@@ -54,4 +59,8 @@ object Notifications {
 
         NotificationManagerCompat.from(context).notify(id, notification)
     }
+
+    /** El resumen de buenos días (sustituye al del día anterior si sigue ahí). */
+    fun showBriefing(context: Context, briefing: com.apache.mobile.reminders.BriefingResult) =
+        show(context, BRIEFING_NOTIFICATION, CHANNEL_BRIEFING, briefing.title, briefing.text)
 }

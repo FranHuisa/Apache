@@ -35,6 +35,37 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_SUMMARY, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_SUMMARY, value).apply()
 
+    /** Resumen de buenos días: activado y hora ("08:00"). */
+    var briefingEnabled: Boolean
+        get() = prefs.getBoolean(KEY_BRIEFING_ON, true)
+        set(value) = prefs.edit().putBoolean(KEY_BRIEFING_ON, value).apply()
+
+    var briefingTime: String
+        get() = prefs.getString(KEY_BRIEFING_TIME, "08:00").orEmpty().ifBlank { "08:00" }
+        set(value) = prefs.edit().putString(KEY_BRIEFING_TIME, value).apply()
+
+    /**
+     * Última ubicación conocida del móvil (se guarda cada vez que la app la
+     * consigue). La usa el resumen de buenos días, que corre en segundo plano.
+     */
+    var lastLocation: SavedLocation?
+        get() {
+            val lat = prefs.getString(KEY_LAT, null)?.toDoubleOrNull() ?: return null
+            val lon = prefs.getString(KEY_LON, null)?.toDoubleOrNull() ?: return null
+            return SavedLocation(lat, lon, prefs.getString(KEY_PLACE, null))
+        }
+        set(value) {
+            prefs.edit().apply {
+                if (value == null) {
+                    remove(KEY_LAT); remove(KEY_LON); remove(KEY_PLACE)
+                } else {
+                    putString(KEY_LAT, value.latitude.toString())
+                    putString(KEY_LON, value.longitude.toString())
+                    putString(KEY_PLACE, value.place)
+                }
+            }.apply()
+        }
+
     val isConfigured: Boolean
         get() = apiKey.isNotBlank()
 
@@ -63,5 +94,13 @@ class Settings(context: Context) {
         private const val KEY_SPEAK = "speak_replies"
         private const val KEY_CONVERSATION = "conversation_id"
         private const val KEY_SUMMARY = "last_summary_date"
+        private const val KEY_BRIEFING_ON = "briefing_enabled"
+        private const val KEY_BRIEFING_TIME = "briefing_time"
+        private const val KEY_LAT = "last_latitude"
+        private const val KEY_LON = "last_longitude"
+        private const val KEY_PLACE = "last_place"
     }
 }
+
+/** Ubicación guardada: coordenadas y, si se sabe, el nombre del sitio. */
+data class SavedLocation(val latitude: Double, val longitude: Double, val place: String?)

@@ -37,8 +37,9 @@ object WeatherService {
 
     private val ES = Locale.forLanguageTag("es-ES")
 
-    suspend fun current(city: String): CurrentWeather? = runCatching {
-        val report = report(city, 1) ?: return null
+    /** Para Inicio: con [city] null usa la ubicación del móvil. */
+    suspend fun current(city: String?): CurrentWeather? = runCatching {
+        val report = (if (city != null) report(city, 1) else home(1, null)) ?: return null
         val (description, emoji) = GeoLookup.describe(report.code, report.isDay)
         CurrentWeather(
             report.place.substringBefore(','),
@@ -83,9 +84,26 @@ object WeatherService {
             if (candidates.isNotEmpty()) break
         }
         val place = GeoLookup.choose(candidates, query) ?: return null
+        return forecast(place.latitude, place.longitude, place.displayName, days)
+    }
 
+    /** Tiempo en unas coordenadas (la ubicación del móvil). */
+    suspend fun reportAt(latitude: Double, longitude: Double, place: String?, days: Int): WeatherReport? =
+        withContext(Dispatchers.IO) {
+            runCatching { forecast(latitude, longitude, place ?: "tu ubicación", days) }.getOrNull()
+                ?: place?.let { runCatching { wttr(it, days) }.getOrNull() }
+        }
+
+    /** Tiempo del sitio del usuario: ubicación del móvil y, si no, la ciudad de su memoria. */
+    suspend fun home(days: Int, homeCity: String?): WeatherReport? {
+        val location = DeviceLocation.current()
+        if (location != null) reportAt(location.latitude, location.longitude, location.place, days)?.let { return it }
+        return homeCity?.let { report(it, days) }
+    }
+
+    private suspend fun forecast(latitude: Double, longitude: Double, placeName: String, days: Int): WeatherReport {
         val json = getJson(
-            "https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}" +
+            "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude" +
                 "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,is_day" +
                 "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
                 "&forecast_days=${days.coerceIn(2, 7)}&timezone=auto"
@@ -103,7 +121,7 @@ object WeatherService {
             )
         }
         return WeatherReport(
-            place = place.displayName,
+            place = placeName,
             temperature = current.getDouble("temperature_2m"),
             feelsLike = current.optDouble("apparent_temperature").takeUnless { it.isNaN() },
             humidity = current.optInt("relative_humidity_2m", -1).takeIf { it >= 0 },

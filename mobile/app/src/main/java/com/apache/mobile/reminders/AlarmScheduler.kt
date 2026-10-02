@@ -30,6 +30,17 @@ class AlarmScheduler(private val context: Context) {
 
     fun cancelEvent(id: Long) = cancel(KIND_EVENT, id)
 
+    /** Programa (o quita) el resumen de buenos días de la próxima vez que toque. */
+    fun scheduleBriefing() {
+        val settings = (context.applicationContext as com.apache.mobile.ApacheApp).settings
+        cancel(KIND_BRIEFING, BRIEFING_ID)
+        if (!settings.briefingEnabled) return
+        val time = runCatching { java.time.LocalTime.parse(settings.briefingTime) }.getOrDefault(java.time.LocalTime.of(8, 0))
+        var next = java.time.LocalDate.now().atTime(time)
+        if (!next.isAfter(LocalDateTime.now())) next = next.plusDays(1)
+        schedule(KIND_BRIEFING, BRIEFING_ID, next)
+    }
+
     private fun schedule(kind: String, id: Long, at: LocalDateTime) {
         if (at.isBefore(LocalDateTime.now())) return
         val millis = at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
@@ -51,7 +62,11 @@ class AlarmScheduler(private val context: Context) {
             .putExtra(ReminderReceiver.EXTRA_KIND, kind)
             .putExtra(ReminderReceiver.EXTRA_ID, id)
         // requestCode distinto para recordatorios y eventos con el mismo id.
-        val requestCode = (if (kind == KIND_EVENT) 1_000_000 else 0) + (id % 1_000_000).toInt()
+        val requestCode = when (kind) {
+            KIND_EVENT -> 1_000_000
+            KIND_BRIEFING -> 2_000_000
+            else -> 0
+        } + (id % 1_000_000).toInt()
         return PendingIntent.getBroadcast(
             context, requestCode, intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -61,5 +76,7 @@ class AlarmScheduler(private val context: Context) {
     companion object {
         const val KIND_REMINDER = "reminder"
         const val KIND_EVENT = "event"
+        const val KIND_BRIEFING = "briefing"
+        const val BRIEFING_ID = 1L
     }
 }

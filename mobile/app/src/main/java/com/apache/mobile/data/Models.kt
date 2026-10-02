@@ -39,3 +39,14 @@ data class Reminder(
     val triggerAt: LocalDateTime,
     val status: String
 )
+
+/** Elemento de una lista ("compra", "tareas"...). */
+data class TaskItem(
+    val id: Long,
+    val list: String,
+    val title: String,
+    val done: Boolean
+)
+
+/** Resumen de una lista: cuántos quedan y cuántos hay en total. */
+data class TaskListSummary(val name: String, val pending: Int, val total: Int)

@@ -16,6 +16,7 @@ import java.time.LocalDateTime
  *  - memory: lo que Apache recuerda del usuario.
  *  - event: calendario y bloques del horario.
  *  - reminder: recordatorios con aviso.
+ *  - task: tareas y listas (compra, pendientes...). Desde la versión 2.
  *
  * Se usa SQLite "a mano" (sin Room) para no necesitar procesadores de
  * anotaciones en la compilación.
@@ -82,16 +83,33 @@ class ApacheDatabase(context: Context) : SQLiteOpenHelper(context, NAME, null, V
             )
             """
         )
+        createTaskTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Versión 1: todavía no hay migraciones. Cuando cambie el esquema, se
-        // añadirán aquí de forma aditiva (ALTER TABLE ...) para no perder datos.
+        // Migraciones aditivas: nunca se borran datos.
+        if (oldVersion < 2) createTaskTable(db)
+    }
+
+    private fun createTaskTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS task (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                list_name TEXT NOT NULL,
+                title TEXT NOT NULL,
+                done INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                done_at TEXT
+            )
+            """
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_task_list ON task(list_name)")
     }
 
     companion object {
         private const val NAME = "apache.db"
-        private const val VERSION = 1
+        private const val VERSION = 2
 
         fun now(): String = LocalDateTime.now().withNano(0).toString()
     }
