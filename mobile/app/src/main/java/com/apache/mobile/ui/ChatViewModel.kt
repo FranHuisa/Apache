@@ -90,10 +90,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             } else if (++silences >= 2) {
                 endConversation(say = "Te dejo, si necesitas algo me llamas.")
             } else {
-                speechInput.start()
+                listenAgain()
             }
         }
     )
+
+    /** Vuelve a escuchar (función aparte: speechInput no puede usarse a sí mismo al crearse). */
+    private fun listenAgain() = speechInput.start()
 
     init {
         loadConversation()
