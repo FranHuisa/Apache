@@ -12,8 +12,8 @@ class Settings(context: Context) {
 
     /** API key de Gemini (https://aistudio.google.com/apikey). Sin ella Apache no puede responder. */
     var apiKey: String
-        get() = prefs.getString(KEY_API, "").orEmpty()
-        set(value) = prefs.edit().putString(KEY_API, value.trim()).apply()
+        get() = cleanApiKey(prefs.getString(KEY_API, "").orEmpty())
+        set(value) = prefs.edit().putString(KEY_API, cleanApiKey(value)).apply()
 
     /** Modelo de Gemini. Por defecto, el mismo que usa Apache de escritorio. */
     var model: String
@@ -39,6 +39,21 @@ class Settings(context: Context) {
         get() = apiKey.isNotBlank()
 
     companion object {
+        /**
+         * Limpia lo que se suele pegar de más junto a la clave: espacios, saltos
+         * de línea, comillas o el texto "GEMINI_API_KEY=" / "api-key:".
+         * Si dentro hay algo con forma de clave de Gemini (AIza...), se queda con eso.
+         */
+        fun cleanApiKey(raw: String): String {
+            val text = raw.trim()
+            Regex("AIza[0-9A-Za-z_\\-]{30,}").find(text)?.let { return it.value }
+            return text.substringAfterLast('=').substringAfterLast(": ")
+                .trim().trim('"', '\'', '`').trim()
+        }
+
+        /** Las claves de Gemini empiezan por "AIza" y tienen 39 caracteres. */
+        fun looksLikeGeminiKey(key: String): Boolean = key.startsWith("AIza") && key.length in 35..45
+
         const val DEFAULT_MODEL = "gemini-3.1-flash-lite"
 
         private const val KEY_API = "gemini_api_key"

@@ -106,7 +106,12 @@ class GeminiClient(private val settings: Settings) {
                 continue
             }
 
-            if (code == 400 && "API key" in text) throw GeminiException("La API key de Gemini no es válida. Revísala en Ajustes.")
+            if ((code == 400 && "API key" in text) || code == 401 || code == 403) {
+                throw GeminiException(
+                    "Google no acepta la API key (error $code). Ve a Ajustes, borra la clave y pega solo " +
+                        "el texto que empieza por «AIza» (unos 39 caracteres), sin comillas ni nada delante."
+                )
+            }
             if (code == 404) throw GeminiException("El modelo «${settings.model}» no existe. Cámbialo en Ajustes.")
             if (code !in 200..299) throw GeminiException("Gemini respondió con un error ($code).")
 

@@ -68,6 +68,17 @@ fun SettingsScreen(onSaved: () -> Unit) {
                 TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "Ocultar" else "Ver", fontSize = 12.sp) }
             }
         )
+        // Aviso si lo pegado no tiene pinta de clave de Gemini (AIza..., ~39 caracteres).
+        val cleaned = Settings.cleanApiKey(apiKey)
+        if (apiKey.isNotBlank() && !Settings.looksLikeGeminiKey(cleaned)) {
+            Text(
+                "Esto no parece una clave de Gemini: debe empezar por «AIza» y tener unos 39 caracteres.",
+                color = ApacheColors.danger, fontSize = 13.sp
+            )
+        } else if (apiKey.isNotBlank() && cleaned != apiKey.trim()) {
+            Text("Se guardará solo la clave (sin comillas ni texto de más).", color = ApacheColors.accentLight, fontSize = 13.sp)
+        }
+
         TextButton(onClick = {
             runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/apikey"))) }
         }) { Text("Conseguir una API key (gratis) ↗", color = ApacheColors.accentLight) }
