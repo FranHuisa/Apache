@@ -77,7 +77,8 @@ class GeminiClient(private val settings: Settings) {
         }
 
         val request = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=$apiKey")
+            .url("https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent")
+            .header("x-goog-api-key", apiKey)
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
@@ -113,7 +114,8 @@ class GeminiClient(private val settings: Settings) {
                 val shape = "empieza por «${apiKey.take(4)}», ${apiKey.length} caracteres"
                 throw GeminiException(
                     "Google no acepta la API key (error $code: $google). La clave guardada $shape. " +
-                        "Debe empezar por «AIza» y tener 39 caracteres: créala en aistudio.google.com/apikey y pégala en Ajustes."
+                        "Si empieza por «AQ.», Google todavía falla con algunas cuentas: crea otra en aistudio.google.com/apikey " +
+                        "o usa la misma clave «AIza…» que el Apache del PC."
                 )
             }
             if (code == 404) throw GeminiException("El modelo «${settings.model}» no existe. Cámbialo en Ajustes.")

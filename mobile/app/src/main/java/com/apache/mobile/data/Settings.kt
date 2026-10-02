@@ -47,12 +47,14 @@ class Settings(context: Context) {
         fun cleanApiKey(raw: String): String {
             val text = raw.trim()
             Regex("AIza[0-9A-Za-z_\\-]{30,}").find(text)?.let { return it.value }
+            Regex("AQ\\.[0-9A-Za-z_\\-.]{20,}").find(text)?.let { return it.value }
             return text.substringAfterLast('=').substringAfterLast(": ")
                 .trim().trim('"', '\'', '`').trim()
         }
 
-        /** Las claves de Gemini empiezan por "AIza" y tienen 39 caracteres. */
-        fun looksLikeGeminiKey(key: String): Boolean = key.startsWith("AIza") && key.length in 35..45
+        /** Claves de Gemini: las clásicas "AIza…" (39 caracteres) y las nuevas "AQ.…". */
+        fun looksLikeGeminiKey(key: String): Boolean =
+            (key.startsWith("AIza") && key.length in 35..45) || (key.startsWith("AQ.") && key.length >= 30)
 
         const val DEFAULT_MODEL = "gemini-3.1-flash-lite"
 
