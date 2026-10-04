@@ -111,6 +111,11 @@ Orden de trabajo: de lo más sencillo a lo más complejo.
 * [x] Móvil: sin repetir el mismo aviso, horas de silencio (noche) y opción de desactivarlo en Ajustes
 * [ ] PC: avisos proactivos mientras Apache está abierto
 
+### 8.5 Apache como asistente del móvil
+* [x] Móvil: elegible como asistente predeterminado (mantener pulsado inicio → Apache escuchando)
+* [x] Móvil: botón de voz de auriculares y accesos directos del icono
+* [ ] Móvil: ventana flotante sobre la app que estés usando (sin abrir Apache entero)
+
 ### Ideas para más adelante
 * [ ] Cámara «¿qué es esto?» (plantas, menús, etiquetas)
 * [ ] Gastos con foto del ticket

@@ -61,6 +61,26 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Asistente del móvil: al mantener pulsado inicio (o el gesto de asistente)
+                 se abre Apache ya escuchando, si se elige como asistente predeterminado. -->
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- Botón de voz de auriculares y coches. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- Accesos directos del icono (Hablar, Mi resumen). -->
+            <intent-filter>
+                <action android:name="com.apache.mobile.TALK" />
+                <action android:name="com.apache.mobile.BRIEFING" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
             <!-- Compartir → Apache desde cualquier app: texto, enlaces, imágenes y PDF. -->
             <intent-filter android:label="Preguntar a Apache">
                 <action android:name="android.intent.action.SEND" />

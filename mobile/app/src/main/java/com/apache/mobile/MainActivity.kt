@@ -83,17 +83,22 @@ class MainActivity : ComponentActivity() {
     /** Se abrió desde el aviso del diario ("¿qué tal el día?"). */
     private var pendingDiary by mutableStateOf(false)
 
+    /** Se abrió como asistente del móvil o desde un acceso directo: "talk" o "briefing". */
+    private var pendingLaunch by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) {
             pendingShare = readShare(intent)
             pendingDiary = intent?.getStringExtra(Notifications.EXTRA_OPEN) == Notifications.OPEN_DIARY
+            pendingLaunch = launchAction(intent)
         }
         setContent {
             ApacheTheme {
                 ApacheMobileApp(
                     pendingShare, onShareConsumed = { pendingShare = null },
-                    openDiary = pendingDiary, onDiaryConsumed = { pendingDiary = false }
+                    openDiary = pendingDiary, onDiaryConsumed = { pendingDiary = false },
+                    launch = pendingLaunch, onLaunchConsumed = { pendingLaunch = null }
                 )
             }
         }
@@ -103,6 +108,19 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         readShare(intent)?.let { pendingShare = it }
         if (intent.getStringExtra(Notifications.EXTRA_OPEN) == Notifications.OPEN_DIARY) pendingDiary = true
+        launchAction(intent)?.let { pendingLaunch = it }
+    }
+
+    /** Asistente (botón de inicio pulsado, auriculares) o acceso directo "Hablar" → "talk". */
+    private fun launchAction(intent: Intent?): String? = when (intent?.action) {
+        Intent.ACTION_ASSIST, Intent.ACTION_VOICE_COMMAND, ACTION_TALK -> "talk"
+        ACTION_BRIEFING -> "briefing"
+        else -> null
+    }
+
+    companion object {
+        const val ACTION_TALK = "com.apache.mobile.TALK"
+        const val ACTION_BRIEFING = "com.apache.mobile.BRIEFING"
     }
 
     /** Texto, enlace o imágenes compartidos desde otra app. */
@@ -135,7 +153,9 @@ private fun ApacheMobileApp(
     share: SharedContent?,
     onShareConsumed: () -> Unit,
     openDiary: Boolean,
-    onDiaryConsumed: () -> Unit
+    onDiaryConsumed: () -> Unit,
+    launch: String?,
+    onLaunchConsumed: () -> Unit
 ) {
     val chat: ChatViewModel = viewModel()
     val settings = ApacheApp.get().settings
@@ -217,6 +237,21 @@ private fun ApacheMobileApp(
         }
     }
     BackHandler(enabled = chat.conversationMode) { chat.endConversation() }
+
+    // Abierto como asistente del móvil o desde un acceso directo del icono.
+    LaunchedEffect(launch) {
+        when (launch) {
+            "talk" -> {
+                section = Section.CHAT
+                onConversation()
+            }
+            "briefing" -> {
+                section = Section.CHAT
+                chat.send("Dame mi resumen del día")
+            }
+        }
+        if (launch != null) onLaunchConsumed()
+    }
 
     // Avisos cortos del chat (imagen guardada, errores de voz...).
     LaunchedEffect(chat.notice) {

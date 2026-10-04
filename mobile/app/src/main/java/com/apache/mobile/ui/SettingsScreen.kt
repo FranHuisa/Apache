@@ -1,6 +1,9 @@
 package com.apache.mobile.ui
 
+import android.app.role.RoleManager
+import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.net.Uri
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,6 +29,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +39,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -68,6 +75,17 @@ fun SettingsScreen(onSaved: () -> Unit) {
     var checking by remember { mutableStateOf(false) }
     var alerts by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+
+    // ¿Apache es ya el asistente del móvil? Se vuelve a mirar al volver a la app.
+    var isAssistant by remember { mutableStateOf(isDefaultAssistant(context)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) isAssistant = isDefaultAssistant(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)
@@ -116,6 +134,41 @@ fun SettingsScreen(onSaved: () -> Unit) {
             singleLine = true,
             supportingText = { Text("Por defecto ${Settings.DEFAULT_MODEL}") }
         )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Asistente del móvil: Apache al mantener pulsado inicio.
+        Text("Asistente del móvil", color = ApacheColors.accent, fontSize = 15.sp)
+        Surface(color = ApacheColors.card, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                if (isAssistant) {
+                    Text("✓ Apache es tu asistente", color = ApacheColors.accentLight, fontSize = 15.sp)
+                    Text(
+                        "Mantén pulsado el botón de inicio (o desliza desde una esquina abajo) y Apache te escucha.",
+                        color = ApacheColors.textMuted, fontSize = 13.sp
+                    )
+                } else {
+                    Text("Abre Apache con el botón de inicio", color = Color.White, fontSize = 15.sp)
+                    Text(
+                        "Toca el botón y elige «App de asistente digital» → Apache. Luego, al mantener pulsado " +
+                            "inicio, Apache se abre ya escuchando. («Ok Google» seguirá siendo de Google.)",
+                        color = ApacheColors.textMuted, fontSize = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val intents = listOf(
+                                Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS),
+                                Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS),
+                                Intent(android.provider.Settings.ACTION_SETTINGS)
+                            )
+                            intents.firstOrNull { runCatching { context.startActivity(it) }.isSuccess }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = ApacheColors.accent, contentColor = Color.Black)
+                    ) { Text("Hacer Apache mi asistente") }
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -278,4 +331,15 @@ fun SettingsScreen(onSaved: () -> Unit) {
         Spacer(modifier = Modifier.height(24.dp))
         Text("Apache Móvil 0.2.0 · todo se guarda en este teléfono", color = ApacheColors.textFaint, fontSize = 12.sp)
     }
+}
+
+/** true si Apache es la app de asistente predeterminada (Android 10+). */
+private fun isDefaultAssistant(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val roles = context.getSystemService(RoleManager::class.java)
+        if (roles != null && roles.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) return roles.isRoleHeld(RoleManager.ROLE_ASSISTANT)
+    }
+    // Android 8-9: el asistente se guarda en un ajuste del sistema.
+    val assistant = android.provider.Settings.Secure.getString(context.contentResolver, "assistant").orEmpty()
+    return assistant.startsWith(context.packageName)
 }

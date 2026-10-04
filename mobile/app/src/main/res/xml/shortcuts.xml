@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Accesos al mantener pulsado el icono de Apache. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="talk"
+        android:enabled="true"
+        android:icon="@drawable/ic_launcher_foreground"
+        android:shortcutShortLabel="@string/shortcut_talk_short"
+        android:shortcutLongLabel="@string/shortcut_talk_long">
+        <intent
+            android:action="com.apache.mobile.TALK"
+            android:targetPackage="com.apache.mobile"
+            android:targetClass="com.apache.mobile.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="briefing"
+        android:enabled="true"
+        android:icon="@drawable/ic_launcher_foreground"
+        android:shortcutShortLabel="@string/shortcut_briefing_short"
+        android:shortcutLongLabel="@string/shortcut_briefing_long">
+        <intent
+            android:action="com.apache.mobile.BRIEFING"
+            android:targetPackage="com.apache.mobile"
+            android:targetClass="com.apache.mobile.MainActivity" />
+    </shortcut>
+</shortcuts>

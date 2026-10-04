@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Apache</string>
+    <string name="shortcut_talk_short">Hablar</string>
+    <string name="shortcut_talk_long">Hablar con Apache</string>
+    <string name="shortcut_briefing_short">Mi resumen</string>
+    <string name="shortcut_briefing_long">Mi resumen del día</string>
 </resources>

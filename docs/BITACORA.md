@@ -1,5 +1,11 @@
 # Bitácora de desarrollo — Apache
 
+## 04/10/2026 — Apache como asistente del móvil
+
+* MainActivity atiende `ACTION_ASSIST` (mantener pulsado inicio o el gesto de asistente) y `VOICE_COMMAND` (botón de auriculares/coche): Apache se abre en modo conversación, ya escuchando. Así puede elegirse como «App de asistente digital» predeterminada. «Ok Google» no se puede sustituir (Android lo reserva).
+* Accesos directos del icono (mantenerlo pulsado): «Hablar con Apache» y «Mi resumen del día».
+* Ajustes → «Asistente del móvil»: dice si Apache ya es el asistente (RoleManager en Android 10+) y tiene un botón que abre los ajustes del sistema para elegirlo.
+
 ## 02/10/2026 (amanecer) — Fase 8 en el móvil: manos libres, rutinas, diario y Apache proactivo
 
 * **Conversación manos libres:** botón 🎧 en el chat y en Inicio. Apache dice «Dime», escucha, responde en voz alta y vuelve a escuchar solo. Termina con «para», «gracias, ya está», el botón rojo, la tecla atrás o dos silencios seguidos. Pantalla completa con el orbe que cambia según escucha, piensa o habla. `Speaker` avisa al terminar de hablar (UtteranceProgressListener).
