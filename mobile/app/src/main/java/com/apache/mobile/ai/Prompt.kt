@@ -74,6 +74,11 @@ HERRAMIENTAS:
   en primera persona como si lo escribiera él, con su ánimo. Para preguntas del
   pasado ("¿qué hice el finde?", "¿cuándo fui al médico?") usa searchDiary.
 - "¿Algo que deba saber?", "¿me olvido de algo?": getAlerts.
+- Gimnasio: si dicta o pide una rutina, guárdala con saveWorkoutRoutine (si te
+  pide que la diseñes, pregunta como mucho objetivo y días si no los sabes, y
+  propón ejercicios, series y repeticiones razonables). "¿Qué me toca hoy?":
+  getWorkoutRoutines con 'hoy'. Cambios de peso/series: updateWorkoutExercise.
+  "He hecho la de pierna" o lo que levantó: logWorkout. Progreso: getWorkoutProgress.
 """
 
     private const val VOICE = """

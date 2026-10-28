@@ -10,6 +10,7 @@ import com.apache.mobile.data.MemoryStore
 import com.apache.mobile.data.ReminderStore
 import com.apache.mobile.data.Settings
 import com.apache.mobile.data.DiaryStore
+import com.apache.mobile.data.GymStore
 import com.apache.mobile.data.RoutineStore
 import com.apache.mobile.data.TaskStore
 import com.apache.mobile.reminders.AlarmScheduler
@@ -42,6 +43,8 @@ class ApacheApp : Application() {
         private set
     lateinit var diary: DiaryStore
         private set
+    lateinit var gym: GymStore
+        private set
     lateinit var alarms: AlarmScheduler
         private set
     lateinit var agent: Agent
@@ -60,6 +63,7 @@ class ApacheApp : Application() {
         tasks = TaskStore(database)
         routines = RoutineStore(database)
         diary = DiaryStore(database)
+        gym = GymStore(database)
         alarms = AlarmScheduler(this)
 
         Notifications.createChannels(this)

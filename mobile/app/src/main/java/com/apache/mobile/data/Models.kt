@@ -56,3 +56,29 @@ data class Routine(val id: Long, val trigger: String, val steps: List<String>, v
 
 /** Entrada del diario de un día. */
 data class DiaryEntry(val day: java.time.LocalDate, val text: String, val mood: String?)
+
+/** Ejercicio de una rutina de gimnasio. [reps] es texto: "10", "8-12" o "al fallo". */
+data class GymExercise(
+    val id: Long,
+    val routineId: Long,
+    val name: String,
+    val sets: Int,
+    val reps: String,
+    val weight: Double?,
+    val restSeconds: Int?,
+    val notes: String?
+)
+
+/** Rutina de gimnasio ("Pecho y tríceps", "Pierna"...), con su día si lo tiene. */
+data class GymRoutine(val id: Long, val name: String, val day: String?, val exercises: List<GymExercise>)
+
+/** Lo entrenado un día en un ejercicio. */
+data class GymLog(
+    val id: Long,
+    val day: java.time.LocalDate,
+    val routineName: String?,
+    val exercise: String,
+    val sets: Int,
+    val reps: String,
+    val weight: Double?
+)

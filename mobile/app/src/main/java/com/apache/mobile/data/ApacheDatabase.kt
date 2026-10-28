@@ -19,6 +19,7 @@ import java.time.LocalDateTime
  *  - task: tareas y listas (compra, pendientes...). Desde la versión 2.
  *  - routine: rutinas por voz ("me voy a dormir" → varios pasos). Desde la versión 3.
  *  - diary: diario, una entrada por día. Desde la versión 3.
+ *  - gym_routine / gym_exercise / gym_log: rutinas de gimnasio y lo entrenado. Desde la versión 4.
  *
  * Se usa SQLite "a mano" (sin Room) para no necesitar procesadores de
  * anotaciones en la compilación.
@@ -87,12 +88,59 @@ class ApacheDatabase(context: Context) : SQLiteOpenHelper(context, NAME, null, V
         )
         createTaskTable(db)
         createRoutineAndDiaryTables(db)
+        createGymTables(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         // Migraciones aditivas: nunca se borran datos.
         if (oldVersion < 2) createTaskTable(db)
         if (oldVersion < 3) createRoutineAndDiaryTables(db)
+        if (oldVersion < 4) createGymTables(db)
+    }
+
+    private fun createGymTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS gym_routine (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                day TEXT,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS gym_exercise (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                routine_id INTEGER NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                name TEXT NOT NULL,
+                sets INTEGER NOT NULL DEFAULT 3,
+                reps TEXT NOT NULL DEFAULT '10',
+                weight REAL,
+                rest_seconds INTEGER,
+                notes TEXT
+            )
+            """
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_gym_exercise_routine ON gym_exercise(routine_id)")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS gym_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                day TEXT NOT NULL,
+                routine_name TEXT,
+                exercise TEXT NOT NULL,
+                sets INTEGER NOT NULL,
+                reps TEXT NOT NULL,
+                weight REAL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_gym_log_exercise ON gym_log(exercise)")
     }
 
     private fun createRoutineAndDiaryTables(db: SQLiteDatabase) {
@@ -137,7 +185,7 @@ class ApacheDatabase(context: Context) : SQLiteOpenHelper(context, NAME, null, V
 
     companion object {
         private const val NAME = "apache.db"
-        private const val VERSION = 3
+        private const val VERSION = 4
 
         fun now(): String = LocalDateTime.now().withNano(0).toString()
     }
