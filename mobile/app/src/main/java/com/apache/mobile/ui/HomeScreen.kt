@@ -22,13 +22,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Icon
@@ -235,13 +232,9 @@ fun HomeScreen(
         // Accesos rápidos.
         val actions = listOf(
             QuickAction("¿Qué tengo hoy?", Icons.Filled.CalendarMonth, "¿Qué tengo hoy?"),
-            QuickAction("Organiza mi día", Icons.Filled.AutoAwesome, "Organízame el día de hoy"),
-            QuickAction("Noticias de hoy", Icons.Filled.Newspaper, "¿Cuáles son las noticias de hoy?"),
-            QuickAction("¿Qué tiempo hace?", Icons.Filled.WbSunny, "¿Qué tiempo hace hoy y mañana?"),
             QuickAction("Mi resumen", Icons.Filled.Today, "Dame mi resumen del día"),
-            QuickAction("Lista de la compra", Icons.Filled.ShoppingCart, "¿Qué tengo en la lista de la compra?"),
-            QuickAction("Pon música", Icons.Filled.MusicNote, "Pon música para concentrarme"),
-            QuickAction("Enséñame algo", Icons.Filled.Image, "Enséñame una foto bonita de un paisaje")
+            QuickAction("Noticias", Icons.Filled.Newspaper, "¿Cuáles son las noticias de hoy?"),
+            QuickAction("Gym de hoy", Icons.Filled.FitnessCenter, "¿Qué me toca hoy en el gimnasio?")
         )
         actions.chunked(2).forEachIndexed { rowIndex, row ->
             Appear(delay = 160 + rowIndex * 80) {

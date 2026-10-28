@@ -195,6 +195,28 @@ class GymStore(private val db: ApacheDatabase) {
             else -> "${"%.1f".format(java.util.Locale.forLanguageTag("es-ES"), weight)} kg"
         }
 
+        /** "Press banca 4x8 60kg" → Press banca, 4 series, 8 reps, 60 kg. Sin "NxM" → 3×10. */
+        fun parseLines(text: String): List<ExerciseInput> {
+            val pattern = Regex(
+                """^(.*?)\s+(\d+)\s*[x×*]\s*(\d+(?:\s*-\s*\d+)?|al fallo)\s*(?:(?:con|@)\s*)?([\d.,]+)?\s*(?:kg|kilos)?\s*$""",
+                RegexOption.IGNORE_CASE
+            )
+            return text.lines().map { it.trim().trimStart('-', '•', '*').trim() }.filter { it.isNotEmpty() }.map { line ->
+                val match = pattern.find(line)
+                if (match == null) {
+                    ExerciseInput(line)
+                } else {
+                    val (name, sets, reps, weight) = match.destructured
+                    ExerciseInput(
+                        name = name.trim().ifEmpty { line },
+                        sets = sets.toIntOrNull() ?: 3,
+                        reps = reps.replace(Regex("\\s*-\\s*"), "-").lowercase(),
+                        weight = weight.trimEnd('.', ',').replace(',', '.').toDoubleOrNull()
+                    )
+                }
+            }
+        }
+
         fun describe(e: GymExercise): String =
             "${e.name}: ${e.sets}×${e.reps}" + (e.weight?.let { " con ${formatWeight(it)}" } ?: "") +
                 (e.restSeconds?.let { ", descanso ${it}s" } ?: "") + (e.notes?.let { " ($it)" } ?: "")

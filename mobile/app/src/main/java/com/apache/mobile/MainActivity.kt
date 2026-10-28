@@ -69,6 +69,7 @@ import com.apache.mobile.ui.ApacheTheme
 import com.apache.mobile.ui.ChatScreen
 import com.apache.mobile.ui.ChatViewModel
 import com.apache.mobile.ui.ConversationOverlay
+import com.apache.mobile.ui.GymScreen
 import com.apache.mobile.ui.HomeScreen
 import com.apache.mobile.ui.MemoryScreen
 import com.apache.mobile.ui.ScheduleScreen
@@ -296,7 +297,7 @@ private fun ApacheMobileApp(
                         onConversation = onConversation
                     )
                     Section.CHAT -> ChatScreen(chat, onMic, onConversation)
-                    Section.SCHEDULE -> PlannerScreen(chat)
+                    Section.SCHEDULE -> PlannerScreen(chat, onOpenChat = { section = Section.CHAT })
                     Section.MEMORY -> MemoryScreen(chat, onOpenChat = { section = Section.CHAT })
                     Section.SETTINGS -> SettingsScreen(onSaved = {
                         chat.dailySummaryIfNeeded()
@@ -314,9 +315,9 @@ private fun ApacheMobileApp(
     }
 }
 
-/** Agenda: el horario del día y las listas, con un selector arriba. */
+/** Agenda: el horario del día, las listas y el gimnasio, con un selector arriba. */
 @Composable
-private fun PlannerScreen(chat: ChatViewModel) {
+private fun PlannerScreen(chat: ChatViewModel, onOpenChat: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf(0) }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -324,7 +325,7 @@ private fun PlannerScreen(chat: ChatViewModel) {
             modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 4.dp).fillMaxWidth()
                 .clip(RoundedCornerShape(50)).background(ApacheColors.surface).padding(4.dp)
         ) {
-            listOf("Horario", "Listas").forEachIndexed { index, label ->
+            listOf("Horario", "Listas", "Gym").forEachIndexed { index, label ->
                 val selected = tab == index
                 val bg by animateColorAsState(if (selected) ApacheColors.accent else Color.Transparent, label = "planner$index")
                 Box(
@@ -337,10 +338,15 @@ private fun PlannerScreen(chat: ChatViewModel) {
             }
         }
         Box(modifier = Modifier.weight(1f)) {
-            if (tab == 0) ScheduleScreen(chat) else {
-                Column {
+            when (tab) {
+                0 -> ScheduleScreen(chat)
+                1 -> Column {
                     Spacer(modifier = Modifier.height(12.dp))
                     TasksScreen(chat)
+                }
+                else -> Column {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    GymScreen(chat, onOpenChat)
                 }
             }
         }

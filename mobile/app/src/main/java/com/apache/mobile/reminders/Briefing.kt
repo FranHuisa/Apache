@@ -63,6 +63,7 @@ object Briefing {
             )
         }
 
+        val gymToday = withContext(Dispatchers.IO) { runCatching { app.gym.routineForToday() }.getOrNull() }
         val weather = weatherJob.await()
         val news = newsJob.await().orEmpty()
 
@@ -89,6 +90,7 @@ object Briefing {
             }
             if (reminders.isNotEmpty()) appendLine("⏰ " + reminders.joinToString { "${it.title} (${it.triggerAt.format(HOUR)})" })
             if (lists.isNotEmpty()) appendLine("📝 Pendiente: " + lists.joinToString { "${it.name} (${it.pending})" })
+            gymToday?.let { appendLine("🏋️ Hoy toca gym: ${it.name} (${it.exercises.size} ejercicios)") }
             if (news.isNotEmpty()) {
                 appendLine("📰 Titulares:")
                 news.forEach { appendLine("  • ${it.title}" + (if (it.source.isNotBlank()) " (${it.source})" else "")) }

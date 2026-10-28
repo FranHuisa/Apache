@@ -1,5 +1,14 @@
 # Bitácora de desarrollo — Apache
 
+## 28/10/2026 — Gimnasio e Inicio más limpio
+
+* **Gimnasio (móvil):** tablas `gym_routine`, `gym_exercise` y `gym_log` (base de datos versión 4) y `GymStore`.
+  * Rutinas con nombre y día, y ejercicios con series, repeticiones («8», «8-12» o «al fallo»), peso, descanso y notas.
+  * Herramientas: `saveWorkoutRoutine` (también para que Apache diseñe una rutina), `getWorkoutRoutines` («¿qué me toca hoy?»), `updateWorkoutExercise` («sube el press banca a 70 kg», añadir o quitar), `deleteWorkoutRoutine`, `logWorkout` («he hecho la de pierna», «press banca 4×8 con 65») y `getWorkoutProgress` (historial y mejor marca).
+  * Pantalla Agenda → Gym: «Hoy toca…» y días entrenados este mes, rutinas desplegables, peso con −/+ de 2,5 kg, editar al tocar, «Hecha hoy» y últimos entrenamientos. Las rutinas nuevas se escriben un ejercicio por línea («Sentadilla 4x8 80»).
+  * El resumen de buenos días incluye la rutina de hoy.
+* **Inicio más limpio:** de 8 accesos rápidos a 4 («¿Qué tengo hoy?», «Mi resumen», «Noticias» y «Gym de hoy»).
+
 ## 04/10/2026 — Apache como asistente del móvil
 
 * MainActivity atiende `ACTION_ASSIST` (mantener pulsado inicio o el gesto de asistente) y `VOICE_COMMAND` (botón de auriculares/coche): Apache se abre en modo conversación, ya escuchando. Así puede elegirse como «App de asistente digital» predeterminada. «Ok Google» no se puede sustituir (Android lo reserva).

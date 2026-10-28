@@ -119,5 +119,7 @@ Orden de trabajo: de lo más sencillo a lo más complejo.
 ### Ideas para más adelante
 * [ ] Cámara «¿qué es esto?» (plantas, menús, etiquetas)
 * [ ] Gastos con foto del ticket
+* [x] Gimnasio: rutinas, ejercicios, series, repeticiones, pesos y progreso (móvil)
+* [ ] Gimnasio en el PC
 * [ ] Hábitos con rachas
 * [ ] Widget en la pantalla de inicio
